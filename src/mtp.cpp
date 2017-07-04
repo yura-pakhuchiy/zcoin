@@ -344,7 +344,11 @@ bool mtp_prover(CBlock *pblock, argon2_instance_t *instance, uint256 hashTarget,
                 blockhash_previous.ref_block = NULL;
                 vector<ProofNode> newproof = mtree.proof(t_previous);
 
-                memcpy(pblock->blockhashInBlockchain[(j * 2) - 1].proof, serializeMTP(newproof), newproof.size() * SHA256_LENGTH * 3 + 1);
+
+                char* buffer = serializeMTP(newproof);
+                memcpy(pblock->blockhashInBlockchain[(j * 2) - 1].proof, buffer, 4034);
+                free(buffer);
+
 
                 // ref block
                 copy_block(&pblock->blockhashInBlockchain[(j * 2) - 2].memory, &instance->memory[instance->memory[ij].ref_block]);
@@ -369,8 +373,9 @@ bool mtp_prover(CBlock *pblock, argon2_instance_t *instance, uint256 hashTarget,
                 blockhash_ref_block.prev_block = NULL;
                 blockhash_ref_block.ref_block = NULL;
 
-                memcpy(pblock->blockhashInBlockchain[(j * 2) - 2].proof,serializeMTP(newproof_ref),newproof_ref.size() * SHA256_LENGTH * 3 + 1);
-
+                char* buff = serializeMTP(newproof_ref);
+                memcpy(pblock->blockhashInBlockchain[(j * 2) - 2].proof, buff ,4034);
+                free(buff);                        
 
                 block X_IJ;
                 __m128i state_test[64];
