@@ -43,7 +43,7 @@ CCriticalSection cs_main;
 CTxMemPool mempool;
 unsigned int nTransactionsUpdated = 0;
 
-map<uint256, CBlockIndex*> mapBlockIndex;
+BlockMap mapBlockIndex;
 map<uint256, CBlockIndex*> mapMTPBlockIndex;
 uint256 hashGenesisBlock("0x4381deb85b1b2c9843c222944b616d997516dcbd6a964e1eaf0def0830695233");
 static CBigNum bnProofOfWorkLimit(~uint256(0) >> 8); // zcoin: starting difficulty is 1 / 2^12
@@ -74,9 +74,6 @@ CMedianFilter<int> cPeerBlockCounts(8, 0); // Amount of blocks that other nodes 
 map<uint256, CBlock*> mapOrphanBlocks;
 multimap<uint256, CBlock*> mapOrphanBlocksByPrev;
 
-map<uint256, CTransaction> mapOrphanTransactions;
-map<uint256, set<uint256> > mapOrphanTransactionsByPrev;
-
 // Constant stuff for coinbase transactions we create:
 CScript COINBASE_FLAGS;
 
@@ -91,6 +88,135 @@ int64 nMinimumInputValue = DUST_HARD_LIMIT;
 
 // security parameter d of MTP
 static unsigned int d_mtp = 1;
+boost::scoped_ptr<CRollingBloomFilter> recentRejects;
+
+struct IteratorComparator
+{
+    template<typename I>
+    bool operator()(const I& a, const I& b)
+    {
+        return &(*a) < &(*b);
+    }
+};
+
+struct COrphanTx {
+    CTransaction tx;
+    NodeId fromPeer;
+    int64_t nTimeExpire;
+};
+
+map<uint256, COrphanTx> mapOrphanTransactions;
+map<COutPoint, set<map<uint256, COrphanTx>::iterator, IteratorComparator> > mapOrphanTransactionsByPrev;
+void EraseOrphansFor(NodeId peer);
+
+struct CBlockReject {
+    unsigned char chRejectCode;
+    string strRejectReason;
+    uint256 hashBlock;
+};
+
+/** Blocks that are in flight, and that are in the queue to be downloaded. Protected by cs_main. */
+    struct QueuedBlock {
+        uint256 hash;
+        CBlockIndex* pindex;                                     //!< Optional.
+        bool fValidatedHeaders;                                  //!< Whether this block has validated headers at the time of request.
+        //std::unique_ptr<PartiallyDownloadedBlock> partialBlock;  //!< Optional, used for CMPCTBLOCK downloads
+    };
+
+/**
+ * Maintain validation-specific state about nodes, protected by cs_main, instead
+ * by CNode's own locks. This simplifies asynchronous operation, where
+ * processing of incoming data is done after the ProcessMessage call returns,
+ * and we're no longer holding the node's locks.
+ */
+struct CNodeState {
+    //! The peer's address
+    CService address;
+    //! Whether we have a fully established connection.
+    bool fCurrentlyConnected;
+    //! Accumulated misbehaviour score for this peer.
+    int nMisbehavior;
+    //! Whether this peer should be disconnected and banned (unless whitelisted).
+    bool fShouldBan;
+    //! String name of this peer (debugging/logging purposes).
+    std::string name;
+    //! List of asynchronously-determined block rejections to notify this peer about.
+    std::vector<CBlockReject> rejects;
+    //! The best known block we know this peer has announced.
+    CBlockIndex *pindexBestKnownBlock;
+    //! The hash of the last unknown block this peer has announced.
+    uint256 hashLastUnknownBlock;
+    //! The last full block we both have.
+    CBlockIndex *pindexLastCommonBlock;
+    //! The best header we have sent our peer.
+    CBlockIndex *pindexBestHeaderSent;
+    //! Length of current-streak of unconnecting headers announcements
+    int nUnconnectingHeaders;
+    //! Whether we've started headers synchronization with this peer.
+    bool fSyncStarted;
+    //! Since when we're stalling block download progress (in microseconds), or 0.
+    int64_t nStallingSince;
+    list<QueuedBlock> vBlocksInFlight;
+    //! When the first entry in vBlocksInFlight started downloading. Don't care when vBlocksInFlight is empty.
+    int64_t nDownloadingSince;
+    int nBlocksInFlight;
+    int nBlocksInFlightValidHeaders;
+    //! Whether we consider this a preferred download peer.
+    bool fPreferredDownload;
+    //! Whether this peer wants invs or headers (when possible) for block announcements.
+    bool fPreferHeaders;
+    //! Whether this peer wants invs or cmpctblocks (when possible) for block announcements.
+    bool fPreferHeaderAndIDs;
+    /**
+      * Whether this peer will send us cmpctblocks if we request them.
+      * This is not used to gate request logic, as we really only care about fSupportsDesiredCmpctVersion,
+      * but is used as a flag to "lock in" the version of compact blocks (fWantsCmpctWitness) we send.
+      */
+    bool fProvidesHeaderAndIDs;
+    //! Whether this peer can give us witnesses
+    bool fHaveWitness;
+    //! Whether this peer wants witnesses in cmpctblocks/blocktxns
+    bool fWantsCmpctWitness;
+    /**
+     * If we've announced NODE_WITNESS to this peer: whether the peer sends witnesses in cmpctblocks/blocktxns,
+     * otherwise: whether this peer sends non-witnesses in cmpctblocks/blocktxns.
+     */
+    bool fSupportsDesiredCmpctVersion;
+
+    CNodeState() {
+        fCurrentlyConnected = false;
+        nMisbehavior = 0;
+        fShouldBan = false;
+        pindexBestKnownBlock = NULL;
+        hashLastUnknownBlock.SetNull();
+        pindexLastCommonBlock = NULL;
+        pindexBestHeaderSent = NULL;
+        nUnconnectingHeaders = 0;
+        fSyncStarted = false;
+        nStallingSince = 0;
+        nDownloadingSince = 0;
+        nBlocksInFlight = 0;
+        nBlocksInFlightValidHeaders = 0;
+        fPreferredDownload = false;
+        fPreferHeaders = false;
+        fPreferHeaderAndIDs = false;
+        fProvidesHeaderAndIDs = false;
+        fHaveWitness = false;
+        fWantsCmpctWitness = false;
+        fSupportsDesiredCmpctVersion = false;
+    }
+};
+
+/** Map maintaining per-node state. Requires cs_main. */
+map<NodeId, CNodeState> mapNodeState;
+
+// Requires cs_main.
+CNodeState *State(NodeId pnode) {
+    map<NodeId, CNodeState>::iterator it = mapNodeState.find(pnode);
+    if (it == mapNodeState.end())
+        return NULL;
+    return &it->second;
+}
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -296,12 +422,17 @@ bool CCoinsViewMemPool::HaveCoins(const uint256 &txid) {
 CCoinsViewCache *pcoinsTip = NULL;
 CBlockTreeDB *pblocktree = NULL;
 
+int64_t GetTransactionWeight(const CTransaction& tx)
+{
+    return ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION ) + ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
+}
+
 //////////////////////////////////////////////////////////////////////////////
 //
 // mapOrphanTransactions
 //
 
-bool AddOrphanTx(const CTransaction& tx)
+bool AddOrphanTx(const CTransaction& tx, NodeId peer) //EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     uint256 hash = tx.GetHash();
     if (mapOrphanTransactions.count(hash))
@@ -312,46 +443,87 @@ bool AddOrphanTx(const CTransaction& tx)
     // large transaction with a missing parent then we assume
     // it will rebroadcast it later, after the parent transaction(s)
     // have been mined or received.
-    // 10,000 orphans, each of which is at most 5,000 bytes big is
-    // at most 500 megabytes of orphans:
-    unsigned int sz = tx.GetSerializeSize(SER_NETWORK, CTransaction::CURRENT_VERSION);
-    if (sz > 5000)
+    // 100 orphans, each of which is at most 99,999 bytes big is
+    // at most 10 megabytes of orphans and somewhat more byprev index (in the worst case):
+    unsigned int sz = GetTransactionWeight(tx);
+    if (sz >= MAX_STANDARD_TX_WEIGHT)
     {
-        printf("ignoring large orphan tx (size: %u, hash: %s)\n", sz, hash.ToString().c_str());
+        //LogPrint("mempool", "ignoring large orphan tx (size: %u, hash: %s)\n", sz, hash.ToString());
         return false;
     }
 
-    mapOrphanTransactions[hash] = tx;
-    BOOST_FOREACH(const CTxIn& txin, tx.vin)
-        mapOrphanTransactionsByPrev[txin.prevout.hash].insert(hash);
+    auto ret = mapOrphanTransactions.emplace(hash, COrphanTx{tx, peer, GetTime() + ORPHAN_TX_EXPIRE_TIME});
+    assert(ret.second);
+    BOOST_FOREACH(const CTxIn& txin, tx.vin) {
+        mapOrphanTransactionsByPrev[txin.prevout].insert(ret.first);
+    }
 
-    printf("stored orphan tx %s (mapsz %" PRIszu")\n", hash.ToString().c_str(),
-        mapOrphanTransactions.size());
+    //LogPrint("mempool", "stored orphan tx %s (mapsz %u outsz %u)\n", hash.ToString(), mapOrphanTransactions.size(), mapOrphanTransactionsByPrev.size());
     return true;
 }
 
-void static EraseOrphanTx(uint256 hash)
+int static EraseOrphanTx(uint256 hash) //EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
-    if (!mapOrphanTransactions.count(hash))
-        return;
-    const CTransaction& tx = mapOrphanTransactions[hash];
-    BOOST_FOREACH(const CTxIn& txin, tx.vin)
+    map<uint256, COrphanTx>::iterator it = mapOrphanTransactions.find(hash);
+    if (it == mapOrphanTransactions.end())
+        return 0;
+    BOOST_FOREACH(const CTxIn& txin, it->second.tx.vin)
     {
-        mapOrphanTransactionsByPrev[txin.prevout.hash].erase(hash);
-        if (mapOrphanTransactionsByPrev[txin.prevout.hash].empty())
-            mapOrphanTransactionsByPrev.erase(txin.prevout.hash);
+        auto itPrev = mapOrphanTransactionsByPrev.find(txin.prevout);
+        if (itPrev == mapOrphanTransactionsByPrev.end())
+            continue;
+        itPrev->second.erase(it);
+        if (itPrev->second.empty())
+            mapOrphanTransactionsByPrev.erase(itPrev);
     }
-    mapOrphanTransactions.erase(hash);
+    mapOrphanTransactions.erase(it);
+    return 1;
 }
 
-unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
+void EraseOrphansFor(NodeId peer)
+{
+    int nErased = 0;
+    map<uint256, COrphanTx>::iterator iter = mapOrphanTransactions.begin();
+    while (iter != mapOrphanTransactions.end())
+    {
+        map<uint256, COrphanTx>::iterator maybeErase = iter++; // increment to avoid iterator becoming invalid
+        if (maybeErase->second.fromPeer == peer)
+        {
+            nErased += EraseOrphanTx(maybeErase->second.tx.GetHash());
+        }
+    }
+    if (nErased > 0) printf("Erased %d orphan tx from peer %d\n", nErased, peer);
+}
+
+
+unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans) //EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     unsigned int nEvicted = 0;
+    static int64_t nNextSweep;
+    int64_t nNow = GetTime();
+    if (nNextSweep <= nNow) {
+        // Sweep out expired orphan pool entries:
+        int nErased = 0;
+        int64_t nMinExpTime = nNow + ORPHAN_TX_EXPIRE_TIME - ORPHAN_TX_EXPIRE_INTERVAL;
+        map<uint256, COrphanTx>::iterator iter = mapOrphanTransactions.begin();
+        while (iter != mapOrphanTransactions.end())
+        {
+            map<uint256, COrphanTx>::iterator maybeErase = iter++;
+            if (maybeErase->second.nTimeExpire <= nNow) {
+                nErased += EraseOrphanTx(maybeErase->second.tx.GetHash());
+            } else {
+                nMinExpTime = std::min(maybeErase->second.nTimeExpire, nMinExpTime);
+            }
+        }
+        // Sweep again 5 minutes after the next entry that expires in order to batch the linear scan.
+        nNextSweep = nMinExpTime + ORPHAN_TX_EXPIRE_INTERVAL;
+        if (nErased > 0) printf("Erased %d orphan tx due to expiration\n", nErased);
+    }
     while (mapOrphanTransactions.size() > nMaxOrphans)
     {
         // Evict a random orphan:
         uint256 randomhash = GetRandHash();
-        map<uint256, CTransaction>::iterator it = mapOrphanTransactions.lower_bound(randomhash);
+        map<uint256, COrphanTx>::iterator it = mapOrphanTransactions.lower_bound(randomhash);
         if (it == mapOrphanTransactions.end())
             it = mapOrphanTransactions.begin();
         EraseOrphanTx(it->first);
@@ -360,16 +532,21 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
     return nEvicted;
 }
 
-
-
-
-
-
-
 //////////////////////////////////////////////////////////////////////////////
 //
 // CTransaction / CTxOut
 //
+
+
+CTransaction& CTransaction::operator=(const CTransaction &tx) {
+    *const_cast<int*>(&nVersion) = tx.nVersion;
+    *const_cast<std::vector<CTxIn>*>(&vin) = tx.vin;
+    *const_cast<std::vector<CTxOut>*>(&vout) = tx.vout;
+    //*const_cast<CTxWitness*>(&wit) = tx.wit;
+    *const_cast<unsigned int*>(&nLockTime) = tx.nLockTime;
+    //*const_cast<uint256*>(&hash) = tx.hash;
+    return *this;
+}
 
 bool CTxOut::IsDust() const
 {
@@ -568,7 +745,7 @@ int CMerkleTx::SetMerkleBranch(const CBlock* pblock)
     }
 
     // Is the tx in a block that's in the main chain
-    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashBlock);
+    BlockMap::iterator mi = mapBlockIndex.find(hashBlock);
     if (mi == mapBlockIndex.end())
         return 0;
     CBlockIndex* pindex = (*mi).second;
@@ -827,6 +1004,7 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
 
                                 libzerocoin::Accumulator accumulator(ZCParams, libzerocoin::ZQ_LOVELACE);
                                 libzerocoin::Accumulator accumulatorRev(ZCParams, libzerocoin::ZQ_LOVELACE);
+                                libzerocoin::Accumulator accumulatorPrecomputed(ZCParams, libzerocoin::ZQ_LOVELACE);
 
                                 bool passVerify = false;
 
@@ -840,32 +1018,43 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
                                 }
 
                                 // VERIFY COINSPEND TX
-                                int countPubcoin = 0;
-                                BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
-                                    //printf("denomination = %d, id = %d, pubcoinId = %d height = %d\n", pubCoinItem.denomination, pubCoinItem.id, pubcoinId, pubCoinItem.nHeight);
+                                // used pre-computed accumulator
+                                walletdb.ReadZerocoinAccumulator(accumulatorPrecomputed, libzerocoin::ZQ_LOVELACE, pubcoinId);
+                                if (newSpend.Verify(accumulatorPrecomputed, newMetadata)) {
+                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                    passVerify = true;
+                                }
 
-                                    if (pubCoinItem.denomination == libzerocoin::ZQ_LOVELACE && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
-                                        printf("## denomination = %d, id = %d, pubcoinId = %d height = %d\n", pubCoinItem.denomination, pubCoinItem.id, pubcoinId, pubCoinItem.nHeight);
-                                        libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_LOVELACE);
-                                        if (!pubCoinTemp.validate()) {
-                                            return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
-                                        }
-                                        countPubcoin++;
-                                        accumulator += pubCoinTemp;
-                                        if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
-                                            if (newSpend.Verify(accumulator, newMetadata)) {
-                                                printf("COIN SPEND TX DID VERIFY!\n");
-                                                passVerify = true;
-                                                break;
+                                unsigned int countPubcoin = 0;
+                                if(!passVerify){
+                                    BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+                                        //printf("denomination = %d, id = %d, pubcoinId = %d height = %d\n", pubCoinItem.denomination, pubCoinItem.id, pubcoinId, pubCoinItem.nHeight);
+
+                                        if (pubCoinItem.denomination == libzerocoin::ZQ_LOVELACE && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
+                                            printf("## denomination = %d, id = %d, pubcoinId = %d height = %d\n", pubCoinItem.denomination, pubCoinItem.id, pubcoinId, pubCoinItem.nHeight);
+                                            libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_LOVELACE);
+                                            if (!pubCoinTemp.validate()) {
+                                                return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
+                                            }
+                                            countPubcoin++;
+                                            accumulator += pubCoinTemp;
+                                            if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
+                                                if (newSpend.Verify(accumulator, newMetadata)) {
+                                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                                    // store this accumulator
+                                                    walletdb.WriteZerocoinAccumulator(accumulator, libzerocoin::ZQ_LOVELACE, pubcoinId);
+                                                    passVerify = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                // It does not have this mint coins id, still sync
-                                if(countPubcoin == 0){
-                                    return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
+                                    // It does not have this mint coins id, still sync
+                                    if(countPubcoin == 0){
+                                        return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
 
+                                    }
                                 }
 
                                 if(!passVerify){
@@ -1002,6 +1191,7 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
 
                                 libzerocoin::Accumulator accumulator(ZCParams, libzerocoin::ZQ_GOLDWASSER);
                                 libzerocoin::Accumulator accumulatorRev(ZCParams, libzerocoin::ZQ_GOLDWASSER);
+                                libzerocoin::Accumulator accumulatorPrecomputed(ZCParams, libzerocoin::ZQ_GOLDWASSER);
 
                                 bool passVerify = false;
 
@@ -1014,31 +1204,44 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
                                 }
 
                                 // VERIFY COINSPEND TX
-                                unsigned int countPubcoin = 0;
-                                BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+                                // used pre-computed accumulator
+                                walletdb.ReadZerocoinAccumulator(accumulatorPrecomputed, libzerocoin::ZQ_GOLDWASSER, pubcoinId);
+                                if (newSpend.Verify(accumulatorPrecomputed, newMetadata)) {
+                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                    passVerify = true;
+                                }
 
-                                    if (pubCoinItem.denomination == libzerocoin::ZQ_GOLDWASSER && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
-                                        libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_GOLDWASSER);
-                                        if (!pubCoinTemp.validate()) {
-                                            return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
-                                        }
-                                        countPubcoin++;
-                                        accumulator += pubCoinTemp;
-                                        if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
-                                            if (newSpend.Verify(accumulator, newMetadata)) {
-                                                printf("COIN SPEND TX DID VERIFY!\n");
-                                                passVerify = true;
-                                                break;
+                                unsigned int countPubcoin = 0;
+                                if(!passVerify){
+                                    BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+
+                                        if (pubCoinItem.denomination == libzerocoin::ZQ_GOLDWASSER && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
+                                            libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_GOLDWASSER);
+                                            if (!pubCoinTemp.validate()) {
+                                                return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
+                                            }
+                                            countPubcoin++;
+                                            accumulator += pubCoinTemp;
+                                            if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
+                                                if (newSpend.Verify(accumulator, newMetadata)) {
+                                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                                    // store this accumulator
+                                                    walletdb.WriteZerocoinAccumulator(accumulator, libzerocoin::ZQ_GOLDWASSER, pubcoinId);
+                                                    passVerify = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
+
+                                    // It does not have this mint coins id, still sync
+                                    if(countPubcoin == 0){
+                                        return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
+
+                                    }
                                 }
 
-                                // It does not have this mint coins id, still sync
-                                if(countPubcoin == 0){
-                                    return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
 
-                                }
 
                                 if(!passVerify){
                                     int countPubcoin = 0;
@@ -1174,6 +1377,7 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
 
                                 libzerocoin::Accumulator accumulator(ZCParams, libzerocoin::ZQ_RACKOFF);
                                 libzerocoin::Accumulator accumulatorRev(ZCParams, libzerocoin::ZQ_RACKOFF);
+                                libzerocoin::Accumulator accumulatorPrecomputed(ZCParams, libzerocoin::ZQ_RACKOFF);
 
                                 bool passVerify = false;
 
@@ -1186,30 +1390,41 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
                                 }
 
                                 // VERIFY COINSPEND TX
-                                unsigned int countPubcoin = 0;
-                                BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+                                // used pre-computed accumulator
+                                walletdb.ReadZerocoinAccumulator(accumulatorPrecomputed, libzerocoin::ZQ_RACKOFF, pubcoinId);
+                                if (newSpend.Verify(accumulatorPrecomputed, newMetadata)) {
+                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                    passVerify = true;
+                                }
 
-                                    if (pubCoinItem.denomination == libzerocoin::ZQ_RACKOFF && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
-                                        libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_RACKOFF);
-                                        if (!pubCoinTemp.validate()) {
-                                            return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
-                                        }
-                                        countPubcoin++;
-                                        accumulator += pubCoinTemp;
-                                        if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
-                                            if (newSpend.Verify(accumulator, newMetadata)) {
-                                                printf("COIN SPEND TX DID VERIFY!\n");
-                                                passVerify = true;
-                                                break;
+                                unsigned int countPubcoin = 0;
+                                if(!passVerify){
+                                    BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+
+                                        if (pubCoinItem.denomination == libzerocoin::ZQ_RACKOFF && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
+                                            libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_RACKOFF);
+                                            if (!pubCoinTemp.validate()) {
+                                                return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
+                                            }
+                                            countPubcoin++;
+                                            accumulator += pubCoinTemp;
+                                            if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
+                                                if (newSpend.Verify(accumulator, newMetadata)) {
+                                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                                    // store this accumulator
+                                                    walletdb.WriteZerocoinAccumulator(accumulator, libzerocoin::ZQ_RACKOFF, pubcoinId);
+                                                    passVerify = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                // It does not have this mint coins id, still sync
-                                if(countPubcoin == 0){
-                                    return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
+                                    // It does not have this mint coins id, still sync
+                                    if(countPubcoin == 0){
+                                        return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
 
+                                    }
                                 }
 
                                 if(!passVerify){
@@ -1345,6 +1560,7 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
 
                                 libzerocoin::Accumulator accumulator(ZCParams, libzerocoin::ZQ_PEDERSEN);
                                 libzerocoin::Accumulator accumulatorRev(ZCParams, libzerocoin::ZQ_PEDERSEN);
+                                libzerocoin::Accumulator accumulatorPrecomputed(ZCParams, libzerocoin::ZQ_PEDERSEN);
 
                                 bool passVerify = false;
 
@@ -1357,31 +1573,44 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
                                 }
 
                                 // VERIFY COINSPEND TX
-                                unsigned int countPubcoin = 0;
-                                BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+                                // used pre-computed accumulator
+                                walletdb.ReadZerocoinAccumulator(accumulatorPrecomputed, libzerocoin::ZQ_PEDERSEN, pubcoinId);
+                                if (newSpend.Verify(accumulatorPrecomputed, newMetadata)) {
+                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                    passVerify = true;
+                                }
 
-                                    if (pubCoinItem.denomination == libzerocoin::ZQ_PEDERSEN && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
-                                        libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_PEDERSEN);
-                                        if (!pubCoinTemp.validate()) {
-                                            return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
-                                        }
-                                        countPubcoin++;
-                                        accumulator += pubCoinTemp;
-                                        if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
-                                            if (newSpend.Verify(accumulator, newMetadata)) {
-                                                printf("COIN SPEND TX DID VERIFY!\n");
-                                                passVerify = true;
-                                                break;
+                                unsigned int countPubcoin = 0;
+                                if(!passVerify){
+                                    BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+
+                                        if (pubCoinItem.denomination == libzerocoin::ZQ_PEDERSEN && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
+                                            libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_PEDERSEN);
+                                            if (!pubCoinTemp.validate()) {
+                                                return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
+                                            }
+                                            countPubcoin++;
+                                            accumulator += pubCoinTemp;
+                                            if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
+                                                if (newSpend.Verify(accumulator, newMetadata)) {
+                                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                                    // store this accumulator
+                                                    walletdb.WriteZerocoinAccumulator(accumulator, libzerocoin::ZQ_PEDERSEN, pubcoinId);
+                                                    passVerify = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
+
+                                    // It does not have this mint coins id, still sync
+                                    if(countPubcoin == 0){
+                                        return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
+
+                                    }
                                 }
 
-                                // It does not have this mint coins id, still sync
-                                if(countPubcoin == 0){
-                                    return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
 
-                                }
 
                                 if(!passVerify){
                                     int countPubcoin = 0;
@@ -1516,6 +1745,7 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
 
                                 libzerocoin::Accumulator accumulator(ZCParams, libzerocoin::ZQ_WILLIAMSON);
                                 libzerocoin::Accumulator accumulatorRev(ZCParams, libzerocoin::ZQ_WILLIAMSON);
+                                libzerocoin::Accumulator accumulatorPrecomputed(ZCParams, libzerocoin::ZQ_WILLIAMSON);
 
                                 bool passVerify = false;
 
@@ -1528,32 +1758,45 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
                                 }
 
                                 // VERIFY COINSPEND TX
-                                unsigned int countPubcoin = 0;
-                                BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+                                // used pre-computed accumulator
+                                walletdb.ReadZerocoinAccumulator(accumulatorPrecomputed, libzerocoin::ZQ_WILLIAMSON, pubcoinId);
+                                if (newSpend.Verify(accumulatorPrecomputed, newMetadata)) {
+                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                    passVerify = true;
+                                }
 
-                                    if (pubCoinItem.denomination == libzerocoin::ZQ_WILLIAMSON && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
-                                        printf("## denomination = %d, id = %d, pubcoinId = %d height = %d\n", pubCoinItem.denomination, pubCoinItem.id, pubcoinId, pubCoinItem.nHeight);
-                                        libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_WILLIAMSON);
-                                        if (!pubCoinTemp.validate()) {
-                                            return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
-                                        }
-                                        countPubcoin++;
-                                        accumulator += pubCoinTemp;
-                                        if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
-                                            if (newSpend.Verify(accumulator, newMetadata)) {
-                                                printf("COIN SPEND TX DID VERIFY!\n");
-                                                passVerify = true;
-                                                break;
+                                unsigned int countPubcoin = 0;
+                                if(!passVerify){
+                                    BOOST_FOREACH(const CZerocoinEntry& pubCoinItem, listPubCoin) {
+
+                                        if (pubCoinItem.denomination == libzerocoin::ZQ_WILLIAMSON && pubCoinItem.id == pubcoinId && pubCoinItem.nHeight != -1) {
+                                            printf("## denomination = %d, id = %d, pubcoinId = %d height = %d\n", pubCoinItem.denomination, pubCoinItem.id, pubcoinId, pubCoinItem.nHeight);
+                                            libzerocoin::PublicCoin pubCoinTemp(ZCParams, pubCoinItem.value, libzerocoin::ZQ_WILLIAMSON);
+                                            if (!pubCoinTemp.validate()) {
+                                                return state.DoS(100, error("CTransaction::CheckTransaction() : Error: Public Coin for Accumulator is not valid !!!"));
+                                            }
+                                            countPubcoin++;
+                                            accumulator += pubCoinTemp;
+                                            if (countPubcoin >= 2) { // MINIMUM REQUIREMENT IS 2 PUBCOINS
+                                                if (newSpend.Verify(accumulator, newMetadata)) {
+                                                    printf("COIN SPEND TX DID VERIFY!\n");
+                                                    // store this accumulator
+                                                    walletdb.WriteZerocoinAccumulator(accumulator, libzerocoin::ZQ_WILLIAMSON, pubcoinId);
+                                                    passVerify = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
+
+                                    // It does not have this mint coins id, still sync
+                                    if(countPubcoin == 0){
+                                        return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
+
+                                    }
                                 }
 
-                                // It does not have this mint coins id, still sync
-                                if(countPubcoin == 0){
-                                    return state.DoS(0, error("CTransaction::CheckTransaction() : Error: Node does not have mint zerocoin to verify, please wait until "));
 
-                                }
 
                                 if(!passVerify){
                                     int countPubcoin = 0;
@@ -1667,6 +1910,9 @@ bool CTransaction::CheckTransaction(CValidationState &state, uint256 hashTx, boo
                     else {
                         return state.DoS(100, error("CTransaction::CheckTransaction() : Your spending txout value does not match"));
                     }
+
+                    walletdb.Flush();
+                    walletdb.Close();
                 }
 
             }
@@ -2010,7 +2256,7 @@ int CMerkleTx::GetDepthInMainChainINTERNAL(CBlockIndex* &pindexRet) const
         return 0;
 
     // Find the block it claims to be in
-    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashBlock);
+    BlockMap::iterator mi = mapBlockIndex.find(hashBlock);
     if (mi == mapBlockIndex.end())
         return 0;
     CBlockIndex* pindex = (*mi).second;
@@ -2471,6 +2717,25 @@ bool IsInitialBlockDownload()
             pindexBest->GetBlockTime() < GetTime() - 24 * 60 * 60);
 }
 
+void Misbehaving(NodeId pnode, int howmuch)
+{
+    if (howmuch == 0)
+        return;
+
+    CNodeState *state = State(pnode);
+    if (state == NULL)
+        return;
+
+    state->nMisbehavior += howmuch;
+    int banscore = GetArg("-banscore", DEFAULT_BANSCORE_THRESHOLD);
+    if (state->nMisbehavior >= banscore && state->nMisbehavior - howmuch < banscore)
+    {
+        //LogPrintf("%s: %s (%d -> %d) BAN THRESHOLD EXCEEDED\n", __func__, state->name, state->nMisbehavior-howmuch, state->nMisbehavior);
+        state->fShouldBan = true;
+    } //else
+        //LogPrintf("%s: %s (%d -> %d)\n", __func__, state->name, state->nMisbehavior-howmuch, state->nMisbehavior);
+}
+
 void static InvalidChainFound(CBlockIndex* pindexNew)
 {
     if (pindexNew->nChainWork > nBestInvalidWork)
@@ -2853,7 +3118,13 @@ void ThreadScriptCheck() {
 
 bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsViewCache &view, bool fJustCheck)
 {
-    LastHeight = pindex->nHeight - 1;
+    BuildMerkleTree();
+
+    if(vMerkleTree.size() <= 0){
+        return false;
+    }
+
+    LastHeight = pindex->nHeight;
 
     // Check it again in case a previous version let a bad block in
     if (!CheckBlock(state, pindex->nHeight, !fJustCheck, !fJustCheck, false))
@@ -3286,33 +3557,32 @@ bool SetBestChain(CValidationState &state, CBlockIndex* pindexNew)
 
                             CZerocoinEntry pubCoinTx;
 
-                            // PUBCOIN IS IN DB, BUT NOT UPDATE ID
-                            printf("UPDATING\n");
-                            // GET MAX ID
+                                                // Get the current id
                             int currentId = 1;
-                            BOOST_FOREACH(const CZerocoinEntry& maxIdPubcoin, listPubCoin) {
-                                if (maxIdPubcoin.id > currentId && maxIdPubcoin.denomination == pubCoinItem.denomination) {
-                                    currentId = maxIdPubcoin.id;
-                                }
-                            }
-
-                            // FIND HOW MANY OF MAX ID
                             unsigned int countExistingItems = 0;
-                            BOOST_FOREACH(const CZerocoinEntry& countItemPubcoin, listPubCoin) {
-                                if (currentId == countItemPubcoin.id && countItemPubcoin.denomination == pubCoinItem.denomination) {
-                                    countExistingItems++;
+                            listPubCoin.sort(CompHeight);
+                            BOOST_FOREACH(const CZerocoinEntry& pubCoinIdItem, listPubCoin) {
+                                printf("denomination = %d, id = %d, height = %d\n", pubCoinIdItem.denomination, pubCoinIdItem.id, pubCoinIdItem.nHeight);
+                                if(pubCoinIdItem.id > 0){
+                                    if(pubCoinIdItem.nHeight <= pindex->nHeight){
+                                        if(pubCoinIdItem.denomination == pubCoinItem.denomination){
+                                            countExistingItems++;
+                                            if(pubCoinIdItem.id > currentId){
+                                                currentId = pubCoinIdItem.id;
+                                                countExistingItems = 1;
+                                            }                                                                
+                                        }
+                                    }else{
+                                        break;
+                                    }   
                                 }
-                                printf("pubCoinItem.id = %d\n", countItemPubcoin.id);
                             }
 
-                            // IF IT IS NOT 10 -> ADD MORE
-                            if (countExistingItems < 10) {
-                                pubCoinTx.id = currentId;
+                            if(countExistingItems > 9){
+                                currentId++;
                             }
-                            else {// ELSE INCREASE 1 -> ADD
-                                currentId += 1;
-                                pubCoinTx.id = currentId;
-                            }
+
+                            pubCoinTx.id = currentId;
 
                             pubCoinTx.IsUsed = pubCoinItem.IsUsed;
                             pubCoinTx.randomness = pubCoinItem.randomness;
@@ -3437,6 +3707,12 @@ bool SetBestChain(CValidationState &state, CBlockIndex* pindexNew)
 
 bool CBlock::AddToBlockIndex(CValidationState &state, const CDiskBlockPos &pos)
 {
+    BuildMerkleTree();
+
+    if(vMerkleTree.size() <= 0){
+        return false;
+    }
+
     // Check for duplicate
     uint256 hash = GetHash();
     if (mapBlockIndex.count(hash))
@@ -3455,10 +3731,10 @@ bool CBlock::AddToBlockIndex(CValidationState &state, const CDiskBlockPos &pos)
     // Construct new block index object
     CBlockIndex* pindexNew = new CBlockIndex(*this);
     assert(pindexNew);
-    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.insert(make_pair(hash, pindexNew)).first;
+    BlockMap::iterator mi = mapBlockIndex.insert(make_pair(hash, pindexNew)).first;
     mapMTPBlockIndex.insert(make_pair(hashMerkelRoot, pindexNew));
     pindexNew->phashBlock = &((*mi).first);
-    map<uint256, CBlockIndex*>::iterator miPrev = mapBlockIndex.find(hashPrevBlock);
+    BlockMap::iterator miPrev = mapBlockIndex.find(hashPrevBlock);
     if (miPrev != mapBlockIndex.end())
     {
         pindexNew->pprev = (*miPrev).second;
@@ -3691,7 +3967,7 @@ bool CBlock::CheckBlock(CValidationState &state, int nHeight, bool fCheckPOW, bo
     if (GetHash() != hashGenesisBlock)
     {
         int nHeightCheckPoW = 0;
-        map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashPrevBlock);
+        BlockMap::iterator mi = mapBlockIndex.find(hashPrevBlock);
         pindexPrev = (*mi).second;
         if (mi != mapBlockIndex.end())
         {
@@ -3776,7 +4052,7 @@ bool CBlock::AcceptBlock(CValidationState &state, CDiskBlockPos *dbp)
     CBlockIndex* pindexPrev = NULL;
     int nHeight = 0;
     if (hash != hashGenesisBlock) {
-        map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashPrevBlock);
+        BlockMap::iterator mi = mapBlockIndex.find(hashPrevBlock);
         if (mi == mapBlockIndex.end())
             return state.DoS(10, error("AcceptBlock() : prev block not found"));
         pindexPrev = (*mi).second;
@@ -3889,9 +4165,27 @@ bool ProcessBlock(CValidationState &state, CNode* pfrom, CBlock* pblock, CDiskBl
     // Check for duplicate
     uint256 hash = pblock->GetHash();    
     if (mapBlockIndex.count(hash))
-        return state.Invalid(error("ProcessBlock() : already have block %d %s", mapBlockIndex[hash]->nHeight, hash.ToString().c_str()));
+        return true;//state.Invalid(error("ProcessBlock() : already have block %d %s", mapBlockIndex[hash]->nHeight, hash.ToString().c_str()));
     if (mapOrphanBlocks.count(hash))
-        return state.Invalid(error("ProcessBlock() : already have block (orphan) %s", hash.ToString().c_str()));
+        return true;//state.Invalid(error("ProcessBlock() : already have block (orphan) %s", hash.ToString().c_str()));
+
+    // If we don't already have its previous block, shunt it off to holding area until we get it
+    if (pblock->hashPrevBlock != 0 && !mapBlockIndex.count(pblock->hashPrevBlock))
+    {
+        printf("ProcessBlock: ORPHAN BLOCK, prev=%s\n", pblock->hashPrevBlock.ToString().c_str());
+
+        // Accept orphans as long as there is a node to request its parents from
+        if (pfrom) {
+            CBlock* pblock2 = new CBlock(*pblock);
+            mapOrphanBlocks.insert(make_pair(hash, pblock2));
+            mapOrphanBlocksByPrev.insert(make_pair(pblock2->hashPrevBlock, pblock2));
+
+            // Ask this guy to fill in what we're missing
+            pfrom->PushGetBlocks(pindexBest, GetOrphanRoot(pblock2));
+        }
+        return true;
+    }
+
 
     uint256 hashMerkelRoot = pblock->hashMerkleRoot;
     if(fTestNet && pblock->LastHeight + 1 >= HF_MTP_HEIGHT_TESTNET){
@@ -3924,24 +4218,6 @@ bool ProcessBlock(CValidationState &state, CNode* pfrom, CBlock* pblock, CDiskBl
         {
             return state.DoS(100, error("ProcessBlock() : block with too little proof-of-work"));
         }
-    }
-
-
-    // If we don't already have its previous block, shunt it off to holding area until we get it
-    if (pblock->hashPrevBlock != 0 && !mapBlockIndex.count(pblock->hashPrevBlock))
-    {
-        printf("ProcessBlock: ORPHAN BLOCK, prev=%s\n", pblock->hashPrevBlock.ToString().c_str());
-
-        // Accept orphans as long as there is a node to request its parents from
-        if (pfrom) {
-            CBlock* pblock2 = new CBlock(*pblock);
-            mapOrphanBlocks.insert(make_pair(hash, pblock2));
-            mapOrphanBlocksByPrev.insert(make_pair(pblock2->hashPrevBlock, pblock2));
-
-            // Ask this guy to fill in what we're missing
-            pfrom->PushGetBlocks(pindexBest, GetOrphanRoot(pblock2));
-        }
-        return true;
     }
 
     // Store to disk
@@ -4187,7 +4463,7 @@ CBlockIndex * InsertBlockIndex(uint256 hash)
         return NULL;
 
     // Return existing
-    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hash);
+    BlockMap::iterator mi = mapBlockIndex.find(hash);
     if (mi != mapBlockIndex.end())
         return (*mi).second;
 
@@ -4352,6 +4628,14 @@ void UnloadBlockIndex()
     nBestInvalidWork = 0;
     hashBestChain = 0;
     pindexBest = NULL;
+    recentRejects.reset(NULL);
+    mapOrphanTransactions.clear();
+    mapOrphanTransactionsByPrev.clear();
+    mapNodeState.clear();
+    BOOST_FOREACH(BlockMap::value_type& entry, mapBlockIndex) {
+        delete entry.second;
+    }
+    mapBlockIndex.clear();
 }
 
 bool LoadBlockIndex()
@@ -4377,6 +4661,9 @@ bool LoadBlockIndex()
 
 
 bool InitBlockIndex() {
+    // Initialize global variables that cannot be constructed at startup.
+    recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
+
     // Check whether we're already initialized
     if (pindexGenesisBlock != NULL)
         return true;
@@ -4474,7 +4761,7 @@ void PrintBlockTree()
 {
     // pre-compute tree structure
     map<CBlockIndex*, vector<CBlockIndex*> > mapNext;
-    for (map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
+    for (BlockMap::iterator mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
     {
         CBlockIndex* pindex = (*mi).second;
         mapNext[pindex->pprev].push_back(pindex);
@@ -4747,7 +5034,7 @@ void static ProcessGetData(CNode* pfrom)
             if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK)
             {
                 bool send = true;
-                map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(inv.hash);
+                BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
                 pfrom->nBlocksRequested++;
                 if (mi != mapBlockIndex.end())
                 {
@@ -4877,6 +5164,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         // Each connection can only send one version message
         if (pfrom->nVersion != 0)
         {
+            pfrom->PushMessage("reject", strCommand, REJECT_DUPLICATE, string("Duplicate version message"));
             pfrom->Misbehaving(1);
             return false;
         }
@@ -4923,6 +5211,11 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             return true;
         }
 
+        if(pfrom->fInbound && addrMe.IsRoutable())
+        {
+            SeenLocal(addrMe);
+        }
+
         // Be shy and don't send version until we hear
         if (pfrom->fInbound)
             pfrom->PushVersion();
@@ -4934,6 +5227,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         // Change version
         pfrom->PushMessage("verack");
         pfrom->ssSend.SetVersion(min(pfrom->nVersion, PROTOCOL_VERSION));
+
+        pfrom->SetAddrLocal(addrMe);
 
         if (!pfrom->fInbound)
         {
@@ -5132,13 +5427,14 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         uint256 hashStop;
         vRecv >> locator >> hashStop;
 
-        // Find the last block the caller has in the main chain
+        // Find the last block the caller has in the main chain        
         CBlockIndex* pindex = locator.GetBlockIndex();
+        SetBestChain(CBlockLocator(pindex));    
 
         // Send the rest of the chain
         if (pindex)
             pindex = pindex->pnext;
-        int nLimit = 2500;
+        int nLimit = 500;
         printf("getblocks %d to %s limit %d\n", (pindex ? pindex->nHeight : -1), hashStop.ToString().c_str(), nLimit);
         for (; pindex; pindex = pindex->pnext)
         {
@@ -5170,7 +5466,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         if (locator.IsNull())
         {
             // If locator is null, return the hashStop block
-            map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashStop);
+            BlockMap::iterator mi = mapBlockIndex.find(hashStop);
             if (mi == mapBlockIndex.end())
                 return true;
             pindex = (*mi).second;
@@ -5199,7 +5495,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
     else if (strCommand == "tx")
     {
-        vector<uint256> vWorkQueue;
+        deque<COutPoint> vWorkQueue;
         vector<uint256> vEraseQueue;
         CDataStream vMsg(vRecv);
         CTransaction tx;
@@ -5214,46 +5510,73 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         if ((!tx.IsZerocoinSpend()) &&
                 (tx.AcceptToMemoryPool(state, true, true, &fMissingInputs)))
         {
-            RelayTransaction(tx, inv.hash);
-            mapAlreadyAskedFor.erase(inv);
-            vWorkQueue.push_back(inv.hash);
-            vEraseQueue.push_back(inv.hash);
+            //mempool.check(pcoinsTip);
+            RelayTransaction(tx, tx.GetHash());
+            for (unsigned int i = 0; i < tx.vout.size(); i++) {
+                vWorkQueue.emplace_back(inv.hash, i);
+            }
 
-            printf("AcceptToMemoryPool: %s %s : accepted %s (poolsz %" PRIszu")\n",
-                pfrom->addr.ToString().c_str(), pfrom->cleanSubVer.c_str(),
-                tx.GetHash().ToString().c_str(),
-                mempool.mapTx.size());
+            pfrom->nLastTXTime = GetTime();
+
+            // LogPrint("mempool", "AcceptToMemoryPool: peer=%d: accepted %s (poolsz %u txn, %u kB)\n",
+            //     pfrom->id,
+            //     tx.GetHash().ToString(),
+            //     mempool.size(), mempool.DynamicMemoryUsage() / 1000);
 
             // Recursively process any orphan transactions that depended on this one
-            for (unsigned int i = 0; i < vWorkQueue.size(); i++)
-            {
-                uint256 hashPrev = vWorkQueue[i];
-                for (set<uint256>::iterator mi = mapOrphanTransactionsByPrev[hashPrev].begin();
-                     mi != mapOrphanTransactionsByPrev[hashPrev].end();
+            set<NodeId> setMisbehaving;
+            while (!vWorkQueue.empty()) {
+                auto itByPrev = mapOrphanTransactionsByPrev.find(vWorkQueue.front());
+                vWorkQueue.pop_front();
+                if (itByPrev == mapOrphanTransactionsByPrev.end())
+                    continue;
+                for (auto mi = itByPrev->second.begin();
+                     mi != itByPrev->second.end();
                      ++mi)
                 {
-                    const uint256& orphanHash = *mi;
-                    const CTransaction& orphanTx = mapOrphanTransactions[orphanHash];
+                    CTransaction orphanTx = (*mi)->second.tx;
+                    uint256 orphanHash = orphanTx.GetHash();
+                    NodeId fromPeer = (*mi)->second.fromPeer;
                     bool fMissingInputs2 = false;
                     // Use a dummy CValidationState so someone can't setup nodes to counter-DoS based on orphan
                     // resolution (that is, feeding people an invalid transaction based on LegitTxX in order to get
                     // anyone relaying LegitTxX banned)
                     CValidationState stateDummy;
 
-                    if (tx.AcceptToMemoryPool(stateDummy, true, true, &fMissingInputs2))
-                    {
-                        printf("   accepted orphan tx %s\n", orphanHash.ToString().c_str());
+
+                    if (setMisbehaving.count(fromPeer))
+                        continue;
+                    if (orphanTx.AcceptToMemoryPool(stateDummy, true, true, &fMissingInputs2)) {
+                        //LogPrint("mempool", "   accepted orphan tx %s\n", orphanHash.ToString());
                         RelayTransaction(orphanTx, orphanHash);
-                        mapAlreadyAskedFor.erase(CInv(MSG_TX, orphanHash));
-                        vWorkQueue.push_back(orphanHash);
+                        for (unsigned int i = 0; i < orphanTx.vout.size(); i++) {
+                            vWorkQueue.emplace_back(orphanHash, i);
+                        }
                         vEraseQueue.push_back(orphanHash);
                     }
                     else if (!fMissingInputs2)
                     {
-                        // invalid or too-little-fee orphan
+                        int nDos = 0;
+                        if (stateDummy.IsInvalid(nDos) && nDos > 0)
+                        {
+                            // Punish peer that gave us an invalid orphan tx
+                            Misbehaving(fromPeer, nDos);
+                            setMisbehaving.insert(fromPeer);
+                            //LogPrint("mempool", "   invalid orphan tx %s\n", orphanHash.ToString());
+                        }
+                        // Has inputs but not accepted to mempool
+                        // Probably non-standard or insufficient fee/priority
+                        //LogPrint("mempool", "   removed orphan tx %s\n", orphanHash.ToString());
                         vEraseQueue.push_back(orphanHash);
-                        printf("   removed orphan tx %s\n", orphanHash.ToString().c_str());
+                        if (!stateDummy.CorruptionPossible()) {
+                            // Do not use rejection cache for witness transactions or
+                            // witness-stripped transactions, as they can have been malleated.
+                            // See https://github.com/bitcoin/bitcoin/issues/8279 for details.
+                            assert(recentRejects);
+                            recentRejects->insert(orphanHash);
+                        }
                     }
+                    //mempool.check(pcoinsTip);
                 }
             }
 
@@ -5311,14 +5634,57 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
                     EraseOrphanTx(hash);
             */
         }else if (fMissingInputs){
+            bool fRejectedParents = false; // It may be the case that the orphans parents have all been rejected
+            BOOST_FOREACH(const CTxIn& txin, tx.vin) {
+                if (recentRejects->contains(txin.prevout.hash)) {
+                    fRejectedParents = true;
+                    break;
+                }
+            }
+            if (!fRejectedParents) {
+                //uint32_t nFetchFlags = GetFetchFlags(pfrom, chainActive.Tip(), chainparams.GetConsensus());
+                BOOST_FOREACH(const CTxIn& txin, tx.vin) {
+                    CInv _inv(MSG_TX , txin.prevout.hash);
+                    pfrom->AddInventoryKnown(_inv);
+                    if (!AlreadyHave(_inv)) pfrom->AskFor(_inv);
+                }
+                AddOrphanTx(tx, pfrom->GetId());
 
-            AddOrphanTx(tx);
+                // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
+                unsigned int nMaxOrphanTx = (unsigned int)std::max((int64)0, GetArg("-maxorphantx", MAX_ORPHAN_TRANSACTIONS));
+                unsigned int nEvicted = LimitOrphanTxSize(nMaxOrphanTx);
+                //if (nEvicted > 0)
+                //    LogPrint("mempool", "mapOrphan overflow, removed %u tx\n", nEvicted);
+            } //else {
+               // LogPrint("mempool", "not keeping orphan with rejected parents %s\n",tx.GetHash().ToString());
+            //}
+        } //else {
+            // if (tx.wit.IsNull() && !state.CorruptionPossible()) {
+            //     // Do not use rejection cache for witness transactions or
+            //     // witness-stripped transactions, as they can have been malleated.
+            //     // See https://github.com/bitcoin/bitcoin/issues/8279 for details.
+            //     assert(recentRejects);
+            //     recentRejects->insert(tx.GetHash());
+            // }
 
-            // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
-            unsigned int nEvicted = LimitOrphanTxSize(MAX_ORPHAN_TRANSACTIONS);
-            if (nEvicted > 0)
-                printf("mapOrphan overflow, removed %u tx\n", nEvicted);
-        }
+            //if (pfrom->fWhitelisted && GetBoolArg("-whitelistforcerelay", DEFAULT_WHITELISTFORCERELAY)) {
+                // Always relay transactions received from whitelisted peers, even
+                // if they were already in the mempool or rejected from it due
+                // to policy, allowing the node to function as a gateway for
+                // nodes hidden behind it.
+                //
+                // Never relay transactions that we would assign a non-zero DoS
+                // score for, as we expect peers to do the same with us in that
+                // case.
+                //int nDoS = 0;
+                //if (!state.IsInvalid(nDoS) || nDoS == 0) {
+                    //LogPrintf("Force relaying tx %s from whitelisted peer=%d\n", tx.GetHash().ToString(), pfrom->id);
+                   // RelayTransaction(tx, tx.GetHash());
+              //  } //else {
+                    //LogPrintf("Not relaying invalid transaction %s from whitelisted peer=%d (%s)\n", tx.GetHash().ToString(), pfrom->id, FormatStateMessage(state));
+                //}
+            //}
+        //}
         int nDoS = 0;
         if (state.IsInvalid(nDoS))
         {
@@ -5338,7 +5704,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         printf("received block %s\n", block.GetHash().ToString().c_str());
         // block.print();
 
-
         CInv inv(MSG_BLOCK, block.GetHash());
         pfrom->AddInventoryKnown(inv);
 
@@ -5350,6 +5715,10 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         if (state.IsInvalid(nDoS))
             if (nDoS > 0)
                 pfrom->Misbehaving(nDoS);
+
+        // Be shy and don't send version until we hear
+        if (pfrom->fInbound)
+            pfrom->PushVersion();
     }
 
 
@@ -5664,27 +6033,10 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         }
 
         // Address refresh broadcast
-        static int64 nLastRebroadcast;
-        if (!IsInitialBlockDownload() && (GetTime() - nLastRebroadcast > 24 * 60 * 60))
-        {
-            {
-                LOCK(cs_vNodes);
-                BOOST_FOREACH(CNode* pnode, vNodes)
-                {
-                    // Periodically clear setAddrKnown to allow refresh broadcasts
-                    if (nLastRebroadcast)
-                        pnode->setAddrKnown.clear();
-
-                    // Rebroadcast our address
-                    if (!fNoListen)
-                    {
-                        CAddress addr = GetLocalAddress(&pnode->addr);
-                        if (addr.IsRoutable())
-                            pnode->PushAddress(addr);
-                    }
-                }
-            }
-            nLastRebroadcast = GetTime();
+        int64 nNow = GetTimeMicros();
+        if (!IsInitialBlockDownload() && pto->nNextLocalAddrSend < nNow) {
+            AdvertiseLocal(pto);
+            pto->nNextLocalAddrSend = PoissonNextSend(nNow, AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL);
         }
 
         //
@@ -5776,7 +6128,7 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         // Message: getdata
         //
         vector<CInv> vGetData;
-        int64 nNow = GetTime() * 1000000;
+        nNow = GetTime() * 1000000;
         while (!pto->mapAskFor.empty() && (*pto->mapAskFor.begin()).first <= nNow)
         {
             const CInv& inv = (*pto->mapAskFor.begin()).second;
@@ -6314,7 +6666,7 @@ bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
     int nHeight = 0;
     if (pblock->GetHash() != hashGenesisBlock)
     {
-        map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(pblock->hashPrevBlock);
+        BlockMap::iterator mi = mapBlockIndex.find(pblock->hashPrevBlock);
         pindexPrev = (*mi).second;
         nHeight = pindexPrev->nHeight+1;
     }
@@ -6687,7 +7039,7 @@ public:
     CMainCleanup() {}
     ~CMainCleanup() {
         // block headers
-        std::map<uint256, CBlockIndex*>::iterator it1 = mapBlockIndex.begin();
+        BlockMap::iterator it1 = mapBlockIndex.begin();
         for (; it1 != mapBlockIndex.end(); it1++)
             delete (*it1).second;
         mapBlockIndex.clear();
@@ -6706,5 +7058,6 @@ public:
 
         // orphan transactions
         mapOrphanTransactions.clear();
+        mapOrphanTransactionsByPrev.clear();
     }
 } instance_of_cmaincleanup;

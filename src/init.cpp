@@ -1001,7 +1001,7 @@ bool AppInit2(boost::thread_group& threadGroup)
     {
         string strMatch = mapArgs["-printblock"];
         int nFound = 0;
-        for (map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
+        for (BlockMap::iterator mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
         {
             uint256 hash = (*mi).first;
             if (strncmp(hash.ToString().c_str(), strMatch.c_str(), strMatch.size()) == 0)
@@ -1072,6 +1072,8 @@ bool AppInit2(boost::thread_group& threadGroup)
                         continue;
                     }else{
                         printf("PROCESS BLOCK = %d\n", pindexRecur->nHeight);
+                        std::string blocksProcessed = "Loading wallet... " + std::to_string(pindexRecur->nHeight) + "/" + std::to_string(mapBlockIndex.size());
+                        uiInterface.InitMessage(blocksProcessed);
                         CBlock blockRecur;
                         blockRecur.ReadFromDisk(pindexRecur);
 
@@ -1095,34 +1097,31 @@ bool AppInit2(boost::thread_group& threadGroup)
 
                                                 CZerocoinEntry pubCoinTx;
 
-                                                // PUBCOIN IS IN DB, BUT NOT UPDATE ID
-                                                //printf("UPDATING\n");
-                                                // GET MAX ID
+                                                // Get the current id
                                                 int currentId = 1;
-                                                BOOST_FOREACH(const CZerocoinEntry& maxIdPubcoin, listPubCoinInLoop) {
-                                                    if (maxIdPubcoin.id > currentId && maxIdPubcoin.denomination == pubCoinItem.denomination) {
-                                                        currentId = maxIdPubcoin.id;
-                                                    }
-                                                }
-
-                                                // FIND HOW MANY OF MAX ID
                                                 unsigned int countExistingItems = 0;
-                                                BOOST_FOREACH(const CZerocoinEntry& countItemPubcoin, listPubCoinInLoop) {
-                                                    if (currentId == countItemPubcoin.id && countItemPubcoin.denomination == pubCoinItem.denomination) {
-                                                        countExistingItems++;
-                                                        //printf("pubCoinItem.id = %d denomination =  %d\n", countItemPubcoin.id, countItemPubcoin.denomination);
+                                                listPubCoinInLoop.sort(CompHeight);
+                                                BOOST_FOREACH(const CZerocoinEntry& pubCoinIdItem, listPubCoinInLoop) {
+                                                    if(pubCoinIdItem.id > 0){
+                                                        if(pubCoinIdItem.nHeight <= pindexRecur->nHeight){
+                                                            if(pubCoinIdItem.denomination == pubCoinItem.denomination){
+                                                                countExistingItems++;
+                                                                if(pubCoinIdItem.id > currentId){
+                                                                    currentId = pubCoinIdItem.id;
+                                                                    countExistingItems = 1;
+                                                                }                                                                
+                                                            }
+                                                        }else{
+                                                            break;
+                                                        }
                                                     }
                                                 }
 
-                                                // IF IT IS NOT 10 -> ADD MORE
-                                                if (countExistingItems < 10) {
-                                                    pubCoinTx.id = currentId;
-                                                }
-                                                else {// ELSE INCREASE 1 -> ADD
-                                                    currentId += 1;
-                                                    pubCoinTx.id = currentId;
+                                                if(countExistingItems > 9){
+                                                    currentId++;
                                                 }
 
+                                                pubCoinTx.id = currentId;
                                                 pubCoinTx.IsUsed = pubCoinItem.IsUsed;
                                                 pubCoinTx.randomness = pubCoinItem.randomness;
                                                 pubCoinTx.denomination = pubCoinItem.denomination;
