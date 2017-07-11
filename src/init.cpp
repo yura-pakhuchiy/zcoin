@@ -1245,7 +1245,10 @@ bool AppInit2(boost::thread_group& threadGroup)
         BOOST_FOREACH(string strFile, mapMultiArgs["-loadblock"])
             vImportFiles.push_back(strFile);
     }
-    threadGroup.create_thread(boost::bind(&ThreadImport, vImportFiles));
+    boost::thread::attributes attrs;
+    attrs.set_stack_size(1024 * 1024 * 8); //8MB for stack size
+    boost::thread th = thread(attrs,boost::bind(&ThreadImport, vImportFiles));
+    threadGroup.add_thread(&th);
 
     // ********************************************************* Step 10: load peers
 

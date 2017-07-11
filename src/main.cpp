@@ -6615,8 +6615,12 @@ void GenerateBitcoins(bool fGenerate, CWallet* pwallet)
         return;
 
     minerThreads = new boost::thread_group();
-    for (int i = 0; i < nThreads; i++)
-        minerThreads->create_thread(boost::bind(&ZcoinMiner, pwallet));
+    for (int i = 0; i < nThreads; i++){
+        boost::thread::attributes attrs;
+        attrs.set_stack_size(1024 * 1024 * 8); //8MB for stack size
+        boost::thread th = thread(attrs,boost::bind(&ZcoinMiner, pwallet));
+        minerThreads->add_thread(&th);
+    }
 
 }
 
