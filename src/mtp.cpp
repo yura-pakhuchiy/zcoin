@@ -346,7 +346,7 @@ bool mtp_prover(CBlock *pblock, argon2_instance_t *instance, uint256 hashTarget,
 
 
                 char* buffer = serializeMTP(newproof);
-                memcpy(pblock->blockhashInBlockchain[(j * 2) - 1].proof, buffer, 4034);
+                memcpy(pblock->blockhashInBlockchain[(j * 2) - 1].proof, buffer, newproof.size() * SHA256_LENGTH * 3 + 1);
                 free(buffer);
 
 
@@ -374,7 +374,7 @@ bool mtp_prover(CBlock *pblock, argon2_instance_t *instance, uint256 hashTarget,
                 blockhash_ref_block.ref_block = NULL;
 
                 char* buff = serializeMTP(newproof_ref);
-                memcpy(pblock->blockhashInBlockchain[(j * 2) - 2].proof, buff ,4034);
+                memcpy(pblock->blockhashInBlockchain[(j * 2) - 2].proof, buff ,newproof_ref.size() * SHA256_LENGTH * 3 + 1);
                 free(buff);                        
 
                 block X_IJ;
@@ -382,7 +382,8 @@ bool mtp_prover(CBlock *pblock, argon2_instance_t *instance, uint256 hashTarget,
                 uint32_t block_header[4];
                 memset(state_test, 0, sizeof(state_test));
                 memcpy(state_test, &pblock->blockhashInBlockchain[(j * 2) - 1].memory.v, ARGON2_BLOCK_SIZE);
-                memcpy(block_header, &pblock->GetHashMTP(), sizeof(__m128i));
+                uint256 hash = pblock->GetHashMTP();
+                memcpy(block_header, &hash, sizeof(__m128i));
                 fill_block(state_test, &pblock->blockhashInBlockchain[(j * 2) - 2].memory, &X_IJ, 0, block_header);
                 X_IJ.prev_block = instance->memory[ij].prev_block;
                 X_IJ.ref_block = instance->memory[ij].ref_block;
@@ -517,7 +518,8 @@ bool mtp_verifier(uint256 hashTarget, CBlock *pblock, uint256 *yL) {
         uint32_t block_header[4];
         memset(state_test, 0, sizeof(state_test));
         memcpy(state_test, &pblock->blockhashInBlockchain[(j * 2) - 1].memory.v, ARGON2_BLOCK_SIZE);
-        memcpy(block_header, &pblock->GetHashMTP(), sizeof(__m128i));
+        uint256 hash = pblock->GetHashMTP();
+        memcpy(block_header, &hash, sizeof(__m128i));
         fill_block(state_test, &pblock->blockhashInBlockchain[(j * 2) - 2].memory, &X_IJ, 0, block_header);
 
         //Y(j) = H(Y(j - 1), X[I(j)])
@@ -635,7 +637,8 @@ bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce
 bool mtp_hash(uint256* output, const char* input, uint256 hashTarget, CBlock *pblock) {
     argon2_context context = init_argon2d_param(input);
     argon2_instance_t instance;
-    memcpy(instance.block_header, &pblock->GetHashMTP(), sizeof(uint32_t) *4 );
+    uint256 hash = pblock->GetHashMTP();
+    memcpy(instance.block_header, &hash, sizeof(uint32_t) *4 );
     argon2_ctx(&context, &instance);
     bool result = mtp_prover(pblock, &instance, hashTarget, output);
     finalize(&context, &instance);
