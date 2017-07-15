@@ -135,11 +135,11 @@ inline unsigned int GetSizeOfCompactSize(uint64 nSize)
 }
 
 // argon2 block with offset
-inline unsigned int GetSerializeSize(const block_with_offset data[140], int, int=0){
+inline unsigned int GetSerializeSize(const block_with_offset data[210], int, int=0){
     //return sizeof(block_with_offset) * 140;
     unsigned int sizeData = 0;
     int i =0 , r = 0, k = 0;
-    for( r = 0; r < 140; r++){
+    for( r = 0; r < 210; r++){
         sizeData += sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK; // v
         sizeData += sizeof(uint64_t) * 2; // ref and prev
         //sizeData += GetSizeOfCompactSize(2882); // compact
@@ -153,11 +153,11 @@ inline unsigned int GetSerializeSize(const block_with_offset data[140], int, int
 
 
 
-template<typename Stream> inline void Serialize(Stream& s, const block_with_offset a[140], int, int=0)
+template<typename Stream> inline void Serialize(Stream& s, const block_with_offset a[210], int, int=0)
 {
     if(a != NULL){
         int i =0 , r = 0, k = 0;
-        for( r = 0; r < 140; r++){
+        for( r = 0; r < 210; r++){
             for(i = 0; i < ARGON2_QWORDS_IN_BLOCK; i++){
                 WRITEDATA(s, a[r].memory.v[i]);
             }
@@ -189,11 +189,11 @@ template<typename Stream> inline void Serialize(Stream& s, const block_with_offs
     }
 }
 
-template<typename Stream> inline void Unserialize(Stream& s, block_with_offset a[140], int, int=0)
+template<typename Stream> inline void Unserialize(Stream& s, block_with_offset a[210], int, int=0)
 {
     if(a != NULL){
         int i = 0, r = 0, k = 0;
-        for( r = 0; r < 140; r++){
+        for( r = 0; r < 210; r++){
 
             for(i = 0; i < ARGON2_QWORDS_IN_BLOCK; i++){
                 READDATA(s, a[r].memory.v[i]);
