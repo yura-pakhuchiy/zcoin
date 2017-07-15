@@ -1343,7 +1343,7 @@ public:
     unsigned int nBits;
     unsigned int nNonce;
     boost::shared_ptr<CAuxPow> auxpow;
-    block_with_offset blockhashInBlockchain[211];
+    block_with_offset blockhashInBlockchain[210];
     uint256 mtpMerkleRoot;
 
 

@@ -6431,7 +6431,7 @@ CBlockHeader CBlockIndex::GetBlockHeader() const
 
     if(CBlockHeader::CURRENT_VERSION == 3){
         int i = 0;
-        for(i = 0; i <= 210; i++){
+        for(i = 0; i < 210; i++){
             block.blockhashInBlockchain[i] = blockhashInBlockchain[i];
         }
         block.mtpMerkleRoot         = mtpMerkleRoot ;
