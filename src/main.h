@@ -136,7 +136,7 @@ unsigned char GetNfactor(int64 nTimestamp);
 extern int64 nTransactionFee;
 extern int64 nMinimumInputValue;
 
-extern bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce,const block_with_offset blockhashInBlockchain[140], uint256 *yL, uint256 blockHeader);
+extern bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce,const block_with_offset blockhashInBlockchain[210], uint256 *yL, uint256 blockHeader);
 
 // Minimum disk space required - used in CheckDiskSpace()
 static const uint64 nMinDiskSpace = 52428800;
@@ -1359,7 +1359,7 @@ public:
     unsigned int nBits;
     unsigned int nNonce;
     boost::shared_ptr<CAuxPow> auxpow;
-    block_with_offset blockhashInBlockchain[140];
+    block_with_offset blockhashInBlockchain[210];
     uint256 mtpMerkleRoot;
 
 
@@ -1447,7 +1447,7 @@ public:
         nNonce = 0;
 
         if(CBlockHeader::CURRENT_VERSION == 3){
-            memset(blockhashInBlockchain,0, sizeof(block_with_offset)*140);
+            memset(blockhashInBlockchain,0, sizeof(block_with_offset)*210);
             mtpMerkleRoot = 0;
         }
 
@@ -1524,7 +1524,7 @@ public:
 
         if(CBlockHeader::CURRENT_VERSION == 3){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < 210; i++){
                 block.blockhashInBlockchain[i] = blockhashInBlockchain[i];
             }
             block.mtpMerkleRoot         = mtpMerkleRoot ;
@@ -1832,7 +1832,7 @@ public:
     unsigned int nTime;
     unsigned int nBits;
     unsigned int nNonce;
-    block_with_offset blockhashInBlockchain[140];
+    block_with_offset blockhashInBlockchain[210];
     uint256 mtpMerkleRoot;
 
 
@@ -1856,7 +1856,7 @@ public:
         nBits          = 0;
         nNonce         = 0;
 
-        memset(blockhashInBlockchain, 0, sizeof(block_with_offset)*140);
+        memset(blockhashInBlockchain, 0, sizeof(block_with_offset)*210);
         mtpMerkleRoot = 0;
     }
 
@@ -1882,14 +1882,14 @@ public:
 
         if(fTestNet && block.LastHeight + 1 >= HF_MTP_HEIGHT_TESTNET){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < 210; i++){
                 blockhashInBlockchain[i] = block.blockhashInBlockchain[i];
             }
             mtpMerkleRoot         = block.mtpMerkleRoot ;
 
         }else if(!fTestNet && block.LastHeight + 1 >= HF_MTP_HEIGHT){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < 210; i++){
                 blockhashInBlockchain[i] = block.blockhashInBlockchain[i];
             }
             mtpMerkleRoot          = block.mtpMerkleRoot;
@@ -2089,14 +2089,14 @@ public:
 
         if(fTestNet && block.LastHeight + 1 >= HF_MTP_HEIGHT_TESTNET){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < 210; i++){
                 block.blockhashInBlockchain[i] = blockhashInBlockchain[i];
             }
             block.mtpMerkleRoot          = mtpMerkleRoot;
 
         }else if(!fTestNet && block.LastHeight + 1 >= HF_MTP_HEIGHT){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < 210; i++){
                 block.blockhashInBlockchain[i] = blockhashInBlockchain[i];
             }
             block.mtpMerkleRoot          = mtpMerkleRoot;
