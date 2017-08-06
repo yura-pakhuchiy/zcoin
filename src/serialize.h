@@ -135,36 +135,30 @@ inline unsigned int GetSizeOfCompactSize(uint64 nSize)
 }
 
 // argon2 block with offset
-inline unsigned int GetSerializeSize(const block_with_offset data[210], int, int=0){
+inline unsigned int GetSerializeSize(const mtp_Proof data[70], int, int=0){
     //return sizeof(block_with_offset) * 140;
     unsigned int sizeData = 0;
     int i =0 , r = 0, k = 0;
-    for( r = 0; r < 210; r++){
-        sizeData += sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK; // v
-        sizeData += sizeof(uint64_t) * 2; // ref and prev
-        //sizeData += GetSizeOfCompactSize(2882); // compact
-        sizeData += sizeof(char) * 4034;
+    for( r = 0; r < 140; r++){
+        sizeData += sizeof(char) * 1431;
     }
 
-     return sizeData;
+    return sizeData;
 }
 
 
-
-
-
-template<typename Stream> inline void Serialize(Stream& s, const block_with_offset a[210], int, int=0)
+template<typename Stream> inline void Serialize(Stream& s, const block_mtpProof a[140], int, int=0)
 {
     if(a != NULL){
         int i =0 , r = 0, k = 0;
-        for( r = 0; r < 210; r++){
+        for( r = 0; r < 140; r++){
             for(i = 0; i < ARGON2_QWORDS_IN_BLOCK; i++){
                 WRITEDATA(s, a[r].memory.v[i]);
             }
             WRITEDATA(s, a[r].memory.prev_block);
             WRITEDATA(s, a[r].memory.ref_block);
             unsigned int c = 0;
-            char x[4034] = { 0 };
+            char x[1431] = { 0 };
             while(true){
                  if(a[r].proof[c] != 0){
                     x[c] = a[r].proof[c];
@@ -174,7 +168,7 @@ template<typename Stream> inline void Serialize(Stream& s, const block_with_offs
                  }
             }
             //WriteCompactSize(s, 2882);
-            s.write((char*)&x[0], 4034 * sizeof(char));
+            s.write((char*)&x[0], 1431 * sizeof(char));
 
 
             /*while(true){
@@ -189,20 +183,35 @@ template<typename Stream> inline void Serialize(Stream& s, const block_with_offs
     }
 }
 
-template<typename Stream> inline void Unserialize(Stream& s, block_with_offset a[210], int, int=0)
+
+template<typename Stream> inline void Serialize(Stream& s, const mtp_Proof a[70], int, int=0)
+{
+    if(a != NULL){
+        int i =0 , r = 0, k = 0;
+        for( r = 0; r < 70; r++){
+            unsigned int c = 0;
+            char x[1431] = { 0 };
+            while(true){
+                 if(a[r].proof[c] != 0){
+                    x[c] = a[r].proof[c];
+                    c++;
+                 }else{
+                     break;
+                 }
+            }
+            s.write((char*)&x[0], 1431 * sizeof(char));
+        }
+    }
+}
+
+template<typename Stream> inline void Unserialize(Stream& s, mtp_Proof a[70], int, int=0)
 {
     if(a != NULL){
         int i = 0, r = 0, k = 0;
-        for( r = 0; r < 210; r++){
-
-            for(i = 0; i < ARGON2_QWORDS_IN_BLOCK; i++){
-                READDATA(s, a[r].memory.v[i]);
-            }
-            READDATA(s, a[r].memory.prev_block);
-            READDATA(s, a[r].memory.ref_block);
+        for( r = 0; r < 70; r++){
             //READDATA(s, a[r].proof);
             //unsigned int nSize = ReadCompactSize(s);
-            s.read((char*)&a[r].proof, 4034 * sizeof(char));
+            s.read((char*)&a[r].proof, 1431 * sizeof(char));
             /*while(true){
                 if(a[r].proof[k] != 0){
                     READDATA(s, a[r].proof[k]);
@@ -215,6 +224,49 @@ template<typename Stream> inline void Unserialize(Stream& s, block_with_offset a
         }
     }
 
+}
+
+
+template<typename Stream> inline void Unserialize(Stream& s, block_mtpProof a[140], int, int=0)
+{
+    if(a != NULL){
+        int i = 0, r = 0, k = 0;
+        for( r = 0; r < 140; r++){
+
+            for(i = 0; i < ARGON2_QWORDS_IN_BLOCK; i++){
+                READDATA(s, a[r].memory.v[i]);
+            }
+            READDATA(s, a[r].memory.prev_block);
+            READDATA(s, a[r].memory.ref_block);
+            //READDATA(s, a[r].proof);
+            //unsigned int nSize = ReadCompactSize(s);
+            s.read((char*)&a[r].proof, 1431 * sizeof(char));
+            /*while(true){
+                if(a[r].proof[k] != 0){
+                    READDATA(s, a[r].proof[k]);
+                    k++;
+                }else{
+                    break;
+                }
+            }*/
+
+        }
+    }
+
+}
+
+inline unsigned int GetSerializeSize(const block_mtpProof data[140], int, int=0){
+    //return sizeof(block_with_offset) * 140;
+    unsigned int sizeData = 0;
+    int i =0 , r = 0, k = 0;
+    for( r = 0; r < 140; r++){
+        sizeData += sizeof(uint64_t) * ARGON2_QWORDS_IN_BLOCK; // v
+        sizeData += sizeof(uint64_t) * 2; // ref and prev
+        //sizeData += GetSizeOfCompactSize(2882); // compact
+        sizeData += sizeof(char) * 1431;
+    }
+
+     return sizeData;
 }
 
 template<typename Stream> inline void Serialize(Stream& s, char a,           int, int=0) { WRITEDATA(s, a); }

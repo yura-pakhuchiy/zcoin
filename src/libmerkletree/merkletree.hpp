@@ -6,13 +6,14 @@
 #include <openssl/sha.h>
 
 #define SHA256_LENGTH 64
+#define NODE_LENGTH 65
 using namespace std;
 
 
 struct ProofNode{
-  uint256 left, right, parent;
-  ProofNode():left(""),right(""),parent(""){}
-  ProofNode(uint256 _left,uint256 _right,uint256 _parent):left(_left),right(_right),parent(_parent){}
+  uint256 hash;
+  bool isRight;
+  ProofNode(){isRight = false; hash = uint256(""); }
 };
 
 // buff 
@@ -99,18 +100,20 @@ public:
     //printf("idx %d\n",idx);
     if(idx == -1)
       return vector<ProofNode>();
-    int proofArrSize = floor( log(tree.size())/ log(2) );
+    int proofArrSize = floor( log(tree.size())/ log(2) ) + 1;
 
 //    printf("proofArrSize : %d\n",proofArrSize);
     vector<ProofNode> proof(proofArrSize);
     int proofIdx = 0;
     while(idx > 0 ){
-      idx = getParent(tree,idx);
-      int left = getLeft(tree,idx);
-      int right = getRight(tree,idx);
-
-      proof[proofIdx++] = ProofNode(tree[left],tree[right],tree[idx]);
+      idx = getBro(tree,idx);
+      proof[proofIdx].isRight = idx % 2 == 0;
+      proof[proofIdx++].hash = tree[idx];
+      idx = getParent(tree, idx);
     }
+
+    proof[proofIdx].isRight = false;
+    proof[proofIdx++].hash = tree[idx];
 
 //	printf("prooffIdx :%d \n",proofIdx);
 
@@ -119,12 +122,13 @@ public:
 //	vector<ProofNode> proof;
     return proof;
   }
-    void pushleaf(uint256 leaf){
-        pushleafworker(combine,leaf);
-	}
+
+  void pushleaf(uint256 leaf){
+    pushleafworker(combine,leaf);
+  }
 
 
-    void pushleafworker(uint256 (*combineFn)(uint256,uint256),uint256 leaf){
+  void pushleafworker(uint256 (*combineFn)(uint256,uint256),uint256 leaf){
 
 		// push two
         tree.push_back(uint256());
@@ -146,7 +150,7 @@ public:
 		}
 
 		// done!
-	}
+  }
 
 
 };

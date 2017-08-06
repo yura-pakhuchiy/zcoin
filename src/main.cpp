@@ -3472,8 +3472,12 @@ bool CBlock::AddToBlockIndex(CValidationState &state, const CDiskBlockPos &pos)
     pindexNew->nUndoPos = 0;
     pindexNew->nStatus = BLOCK_VALID_TRANSACTIONS | BLOCK_HAVE_DATA;
     int i = 0;
-    for(i = 0; i < 210; i++){
-        pindexNew->blockhashInBlockchain[i] = blockhashInBlockchain[i];
+    for(i = 0; i < 140; i++){
+        pindexNew->blockWithMTPProof[i] = blockWithMTPProof[i];
+    }
+    int j = 0;
+    for(j = 0; j < 70; j++){
+        pindexNew->mtpProof[j] = mtpProof[j];
     }
     pindexNew->mtpMerkleRoot = mtpMerkleRoot;
     pindexNew->nBits = nBits;
@@ -6215,7 +6219,7 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn)
         pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock);
         pblock->nNonce         = 0;
         pblock->mtpMerkleRoot = uint256(0);
-        memset(pblock->blockhashInBlockchain, 0, sizeof(block_with_offset)*210);
+        memset(pblock->blockWithMTPProof, 0, sizeof(block_mtpProof)*140);
         pblock->vtx[0].vin[0].scriptSig = CScript() << OP_0 << OP_0;
         pblocktemplate->vTxSigOps[0] = pblock->vtx[0].GetLegacySigOpCount();
 
@@ -6431,10 +6435,15 @@ CBlockHeader CBlockIndex::GetBlockHeader() const
 
     if(CBlockHeader::CURRENT_VERSION == 3){
         int i = 0;
-        for(i = 0; i < 210; i++){
-            block.blockhashInBlockchain[i] = blockhashInBlockchain[i];
+        for(i = 0; i < 140; i++){
+            block.blockWithMTPProof[i] = blockWithMTPProof[i];
         }
-        block.mtpMerkleRoot         = mtpMerkleRoot ;
+
+        int j = 0;
+        for(j = 0; j < 70; j++){
+            block.mtpProof[i] = mtpProof[i];
+        }
+        block.mtpMerkleRoot         = mtpMerkleRoot;
 
     }
 
@@ -6505,6 +6514,9 @@ void static ZcoinMiner(CWallet *pwallet)
                         } else if ( //(!fTestNet && pindexPrev->nHeight + 1 >= HF_MTP_HEIGHT) ||
                                               (fTestNet && pindexPrev->nHeight + 1 >= HF_MTP_HEIGHT_TESTNET)){                            
                             mtpHash = mtp_hash(&thash, BEGIN(pblock->nVersion), hashTarget, pblock);
+                            if(!mtpHash){
+                                break;
+                            }
                         } else if (!fTestNet && pindexPrev->nHeight + 1 >= HF_LYRA2_HEIGHT){
                             LYRA2(BEGIN(thash), 32, BEGIN(pblock->nVersion), 80, BEGIN(pblock->nVersion), 80, 2, 8192, 256);
                         } else if (!fTestNet && pindexPrev->nHeight + 1 >= HF_LYRA2VAR_HEIGHT){

@@ -237,17 +237,27 @@ bool CBlockTreeDB::LoadBlockIndexGuts()
                 pindexNew->nTx            = diskindex.nTx;
 
                 if(fTestNet && diskindex.nHeight >= HF_MTP_HEIGHT_TESTNET){
-                    pindexNew->mtpMerkleRoot            = diskindex.mtpMerkleRoot;
+
                     int i = 0;
-                    for(i = 0; i < 210; i++){
-                        pindexNew->blockhashInBlockchain[i] = diskindex.blockhashInBlockchain[i];
+                    for(i = 0; i < 140; i++){
+                        pindexNew->blockWithMTPProof[i] = diskindex.blockWithMTPProof[i];
                     }
+                    int j = 0;
+                    for(j = 0; j < 70; j++){
+                        pindexNew->mtpProof[j] = diskindex.mtpProof[j];
+                    }
+                    pindexNew->mtpMerkleRoot            = diskindex.mtpMerkleRoot;
+
                 }else if(!fTestNet && diskindex.nHeight >= HF_MTP_HEIGHT){
-                    pindexNew->mtpMerkleRoot            = diskindex.mtpMerkleRoot;
                     int i = 0;
-                    for(i = 0; i < 210; i++){
-                        pindexNew->blockhashInBlockchain[i] = diskindex.blockhashInBlockchain[i];
+                    for(i = 0; i < 140; i++){
+                        pindexNew->blockWithMTPProof[i] = diskindex.blockWithMTPProof[i];
                     }
+                    int j = 0;
+                    for(j = 0; j < 70; j++){
+                        pindexNew->mtpProof[j] = diskindex.mtpProof[j];
+                    }
+                    pindexNew->mtpMerkleRoot            = diskindex.mtpMerkleRoot;
                 }
 
                 // Watch for genesis block

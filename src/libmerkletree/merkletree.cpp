@@ -5,12 +5,11 @@
 
 char* serializeMTP(vector<ProofNode>& proof) // Writes the given OBJECT data to the given file name.
 {
-	char* result = (char*)std::malloc(proof.size() * SHA256_LENGTH * 3 + 1);
-	result[proof.size() * SHA256_LENGTH * 3] = 0;
+    char* result = (char*)std::malloc(proof.size() * NODE_LENGTH + 1);
+    result[proof.size() * NODE_LENGTH] = 0;
 	for (int i = 0; i < proof.size(); i++) {
-		memcpy(result + SHA256_LENGTH*(3 * i), proof.at(i).left.GetHex().c_str(), SHA256_LENGTH);
-		memcpy(result + SHA256_LENGTH*(3 * i + 1), proof.at(i).right.GetHex().c_str(), SHA256_LENGTH);
-		memcpy(result + SHA256_LENGTH*(3 * i + 2), proof.at(i).parent.GetHex().c_str(), SHA256_LENGTH);
+        memcpy(result+NODE_LENGTH*i+1,proof[i].hash.GetHex().c_str(),SHA256_LENGTH);
+        result[NODE_LENGTH*i] = proof[i].isRight? '1':'0';
 	}
 	return result;
 };
@@ -18,25 +17,18 @@ char* serializeMTP(vector<ProofNode>& proof) // Writes the given OBJECT data to 
 vector<ProofNode> deserializeMTP(const char* strdata) // Reads the given file and assigns the data to the given OBJECT.
 {
 	size_t datalen = strlen(strdata);
-	vector<ProofNode> proof(datalen / 3 / SHA256_LENGTH);
-	char *left = new char[SHA256_LENGTH + 1],
-		*right = new char[SHA256_LENGTH + 1],
-		*parent = new char[SHA256_LENGTH + 1];
-	left[SHA256_LENGTH] = 0;
-	right[SHA256_LENGTH] = 0;
-	parent[SHA256_LENGTH] = 0;
-	for (int i = 0; i<proof.size(); i++) {
-		memcpy(left, strdata + SHA256_LENGTH*(3 * i), SHA256_LENGTH);
-		memcpy(right, strdata + SHA256_LENGTH*(3 * i + 1), SHA256_LENGTH);
-		memcpy(parent, strdata + SHA256_LENGTH*(3 * i + 2), SHA256_LENGTH);
-		uint256 v_left(left);
-		uint256 v_right(right);
-		uint256 v_parent(parent);
-		proof[i] = ProofNode(v_left, v_right, v_parent);
+    vector<ProofNode> proof(datalen / NODE_LENGTH);
+
+    char *node = new char[SHA256_LENGTH + 1];
+    node[SHA256_LENGTH] = 0;
+
+    for (int i = 0; i < proof.size(); i++) {
+        memcpy(node,strdata+NODE_LENGTH*i+1,SHA256_LENGTH);
+        uint256 v_node(node);
+        proof[i].hash = v_node;
+        proof[i].isRight = strdata[NODE_LENGTH*i] != '0';
 	}
-	delete[] left;
-	delete[] right;
-	delete[] parent;
+
 	return proof;
 };
 
@@ -60,39 +52,32 @@ uint256 combine(uint256 leftData, uint256 rightData) {
 
 
 bool verifyProof(uint256 leaf, uint256 expectedMerkleRoot, vector<ProofNode> proofArr) {
-	if (proofArr.size() == 0) {
+
+    if (proofArr.size() == 0) {
 		if (leaf != expectedMerkleRoot)
 			return true;
 		return false;
 	}
 
 	// the merkle root should be the parent of the last part
-	uint256 actualMekleRoot = proofArr[proofArr.size() - 1].parent;
+    uint256 actualMekleRoot = proofArr[proofArr.size() - 1].hash;
 
 	if (actualMekleRoot != expectedMerkleRoot)
 		return false;
 
-	uint256 prevParent = leaf;
-	for (int pIdx = 0; pIdx < proofArr.size(); pIdx++) {
-		ProofNode part = proofArr[pIdx];
 
-		if ((part.left != prevParent) && (part.right != prevParent))
-			return false;
-		uint256 parentData;
-		parentData = combine(part.left, part.right);
-
-
-		// Parent in proof is incorrect
-		if (parentData != part.parent)
-			return false;
-
-		prevParent = parentData;
+    for (int pIdx = 0; pIdx < proofArr.size() - 1; pIdx++) {
+        if (proofArr[pIdx].isRight){
+            leaf = combine(leaf,proofArr[pIdx].hash);
+        }else{
+            leaf = combine(proofArr[pIdx].hash,leaf);
+        }
 	}
 /*
 	printf("prevParent = %s\n", prevParent.GetHex().c_str());
 	printf("expectedMerkleRoot = %s\n", expectedMerkleRoot.GetHex().c_str());
 */
-	if (prevParent == expectedMerkleRoot) {
+    if (leaf == expectedMerkleRoot) {
 		return true;
 	}
 	else {
