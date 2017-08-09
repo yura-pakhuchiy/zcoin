@@ -62,15 +62,6 @@ enum argon2_core_constants {
  */
 typedef struct block_ { uint64_t v[ARGON2_QWORDS_IN_BLOCK]; uint64_t prev_block; uint64_t ref_block;} block;
 
-typedef struct block_mtpProof_ {
-    block memory;
-    char proof[1431];
-} block_mtpProof;
-
-typedef struct mtp_Proof_ {
-    char proof[1431];
-} mtp_Proof;
-
 
 /*****************Functions that work with the block******************/
 

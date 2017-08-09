@@ -3472,7 +3472,7 @@ bool CBlock::AddToBlockIndex(CValidationState &state, const CDiskBlockPos &pos)
     pindexNew->nUndoPos = 0;
     pindexNew->nStatus = BLOCK_VALID_TRANSACTIONS | BLOCK_HAVE_DATA;
     int i = 0;
-    for(i = 0; i < 140; i++){
+    for(i = 0; i < MTP_BLOCK_SIZE; i++){
         pindexNew->blockWithMTPProof[i] = blockWithMTPProof[i];
     }
     int j = 0;
@@ -6219,7 +6219,7 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn)
         pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock);
         pblock->nNonce         = 0;
         pblock->mtpMerkleRoot = uint256(0);
-        memset(pblock->blockWithMTPProof, 0, sizeof(block_mtpProof)*140);
+        memset(pblock->blockWithMTPProof, 0, sizeof(block_mtpProof)*MTP_BLOCK_SIZE);
         pblock->vtx[0].vin[0].scriptSig = CScript() << OP_0 << OP_0;
         pblocktemplate->vTxSigOps[0] = pblock->vtx[0].GetLegacySigOpCount();
 
@@ -6435,7 +6435,7 @@ CBlockHeader CBlockIndex::GetBlockHeader() const
 
     if(CBlockHeader::CURRENT_VERSION == 3){
         int i = 0;
-        for(i = 0; i < 140; i++){
+        for(i = 0; i < MTP_BLOCK_SIZE; i++){
             block.blockWithMTPProof[i] = blockWithMTPProof[i];
         }
 

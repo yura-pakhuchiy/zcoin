@@ -3,6 +3,7 @@
 //
 #include "mtp.h"
 #include "libmerkletree/merkletree.hpp"
+#include "main.h"
 
 static const uint8_t L = 70;
 static const unsigned int memory_cost = 2097152;
@@ -344,7 +345,7 @@ bool mtp_prover(CBlock *pblock, argon2_instance_t *instance, uint256 hashTarget,
                 memcpy(pblock->mtpProof[j - 1].proof, buffer_current, newproof_current.size() * NODE_LENGTH + 1);
                 free(buffer_current);
 
-                if((newproof_current.size() * NODE_LENGTH + 1) > 1431){
+                if((newproof_current.size() * NODE_LENGTH + 1) > MTP_PROOF_SIZE){
                     printf("=================== %d ===================\n", newproof_current.size() * NODE_LENGTH + 1);
                 }
 
@@ -586,7 +587,7 @@ bool mtp_verifier(uint256 hashTarget, CBlock *pblock, uint256 *yL) {
 }
 
 
-bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce,const block_mtpProof blockWithMTPProof[140], mtp_Proof mtpProof[70], uint256 *yL, uint256 blockHeader) {
+bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce,const block_mtpProof blockWithMTPProof[MTP_BLOCK_SIZE], mtp_Proof mtpProof[MTP_BLOCK_PROOF_SIZE], uint256 *yL, uint256 blockHeader) {
 
     uint256 mtpMerkelRoot;
     mtpMerkelRoot.SetHex(mtpMerkleRoot.GetHex());

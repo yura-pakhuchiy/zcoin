@@ -239,7 +239,7 @@ bool CBlockTreeDB::LoadBlockIndexGuts()
                 if(fTestNet && diskindex.nHeight >= HF_MTP_HEIGHT_TESTNET){
 
                     int i = 0;
-                    for(i = 0; i < 140; i++){
+                    for(i = 0; i < MTP_BLOCK_SIZE; i++){
                         pindexNew->blockWithMTPProof[i] = diskindex.blockWithMTPProof[i];
                     }
                     int j = 0;
@@ -250,7 +250,7 @@ bool CBlockTreeDB::LoadBlockIndexGuts()
 
                 }else if(!fTestNet && diskindex.nHeight >= HF_MTP_HEIGHT){
                     int i = 0;
-                    for(i = 0; i < 140; i++){
+                    for(i = 0; i < MTP_BLOCK_SIZE; i++){
                         pindexNew->blockWithMTPProof[i] = diskindex.blockWithMTPProof[i];
                     }
                     int j = 0;

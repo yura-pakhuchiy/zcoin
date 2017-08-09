@@ -122,7 +122,7 @@ unsigned char GetNfactor(int64 nTimestamp);
 extern int64 nTransactionFee;
 extern int64 nMinimumInputValue;
 
-extern bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce,const block_mtpProof blockhashInBlockchain[140], mtp_Proof mtpProof[70], uint256 *yL, uint256 blockHeader);
+extern bool mtp_verifier(uint256 hashTarget, uint256 mtpMerkleRoot, unsigned int nNonce,const block_mtpProof blockhashInBlockchain[MTP_BLOCK_SIZE], mtp_Proof mtpProof[MTP_BLOCK_PROOF_SIZE], uint256 *yL, uint256 blockHeader);
 
 // Minimum disk space required - used in CheckDiskSpace()
 static const uint64 nMinDiskSpace = 52428800;
@@ -1343,8 +1343,8 @@ public:
     unsigned int nBits;
     unsigned int nNonce;
     boost::shared_ptr<CAuxPow> auxpow;
-    block_mtpProof blockWithMTPProof[140];
-    mtp_Proof mtpProof[70];
+    block_mtpProof blockWithMTPProof[MTP_BLOCK_SIZE];
+    mtp_Proof mtpProof[MTP_BLOCK_PROOF_SIZE];
     uint256 mtpMerkleRoot;
 
 
@@ -1433,7 +1433,7 @@ public:
         nNonce = 0;
 
         if(CBlockHeader::CURRENT_VERSION == 3){
-            memset(blockWithMTPProof,0, sizeof(block_mtpProof)*140);
+            memset(blockWithMTPProof,0, sizeof(block_mtpProof)*MTP_BLOCK_SIZE);
             memset(mtpProof,0, sizeof(mtp_Proof)*70);
             mtpMerkleRoot = 0;
         }
@@ -1511,7 +1511,7 @@ public:
 
         if(CBlockHeader::CURRENT_VERSION == 3){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < MTP_BLOCK_SIZE; i++){
                 block.blockWithMTPProof[i] = blockWithMTPProof[i];
             }
             block.mtpMerkleRoot         = mtpMerkleRoot ;
@@ -1819,8 +1819,8 @@ public:
     unsigned int nTime;
     unsigned int nBits;
     unsigned int nNonce;
-    block_mtpProof blockWithMTPProof[140];
-    mtp_Proof mtpProof[70];
+    block_mtpProof blockWithMTPProof[MTP_BLOCK_SIZE];
+    mtp_Proof mtpProof[MTP_BLOCK_PROOF_SIZE];
     uint256 mtpMerkleRoot;
 
 
@@ -1844,7 +1844,7 @@ public:
         nBits          = 0;
         nNonce         = 0;
 
-        memset(blockWithMTPProof, 0, sizeof(block_mtpProof)*140);
+        memset(blockWithMTPProof, 0, sizeof(block_mtpProof)*MTP_BLOCK_SIZE);
         memset(mtpProof, 0, sizeof(mtp_Proof)*70);
         mtpMerkleRoot = 0;
     }
@@ -1871,7 +1871,7 @@ public:
 
         if(fTestNet && block.LastHeight + 1 >= HF_MTP_HEIGHT_TESTNET){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < MTP_BLOCK_SIZE; i++){
                 blockWithMTPProof[i] = block.blockWithMTPProof[i];
             }
 
@@ -1884,7 +1884,7 @@ public:
 
         }else if(!fTestNet && block.LastHeight + 1 >= HF_MTP_HEIGHT){
             int i = 0;
-            for(i = 0; i < 140; i++){
+            for(i = 0; i < MTP_BLOCK_SIZE; i++){
                 blockWithMTPProof[i] = block.blockWithMTPProof[i];
             }
 
