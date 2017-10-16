@@ -941,12 +941,13 @@ void BlockAssembler::addPriorityTxs()
     typedef std::map<CTxMemPool::txiter, double, CTxMemPool::CompareIteratorByHash>::iterator waitPriIter;
     double actualPriority = -1;
 
+    bool fTestNet = (Params().NetworkIDString() == CBaseChainParams::TESTNET);
     unsigned int COUNT_SPEND_ZC_TX = 0;
     unsigned int MAX_SPEND_ZC_TX_PER_BLOCK = 0;
     if (nHeight + 1 > 22000) {
         MAX_SPEND_ZC_TX_PER_BLOCK = 1;
     }
-    if (nHeight + 1 > 58500) {
+    if (fTestNet || nHeight + 1 > 58500) {
         MAX_SPEND_ZC_TX_PER_BLOCK = 5;
     }
 

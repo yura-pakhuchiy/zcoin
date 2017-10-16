@@ -625,13 +625,14 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
     UniValue transactions(UniValue::VARR);
     map<uint256, int64_t> setTxIndex;
     int i = 0;
+    bool fTestNet = (Params().NetworkIDString() == CBaseChainParams::TESTNET);
     unsigned int COUNT_SPEND_ZC_TX = 0;
     unsigned int MAX_SPEND_ZC_TX_PER_BLOCK = 0;
     if(chainActive.Height() + 1 > 22000){
         MAX_SPEND_ZC_TX_PER_BLOCK = 1;
     }
 
-    if(chainActive.Height() + 1 > 58500){
+    if(fTestNet || chainActive.Height() + 1 > 58500){
         MAX_SPEND_ZC_TX_PER_BLOCK = 5;
     }
     BOOST_FOREACH (CTransaction& tx, pblock->vtx) {
