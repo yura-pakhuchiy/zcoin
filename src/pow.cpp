@@ -37,7 +37,7 @@ double GetDifficultyHelper(unsigned int nBits) {
 // zcoin GetNextWorkRequired
 unsigned int GetNextWorkRequired(const CBlockIndex *pindexLast, const CBlockHeader *pblock, const Consensus::Params &params) {
     bool fTestNet = Params().NetworkIDString() == CBaseChainParams::TESTNET;
-	if(pindexLast->nHeight > 65077){
+	if(pindexLast->nHeight + 1 > 65077){
 		return bnProofOfWorkLimit.GetCompact();
 	}
 
