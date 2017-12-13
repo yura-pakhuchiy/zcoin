@@ -36,6 +36,7 @@
 #include <boost/thread.hpp>
 #include <boost/tuple/tuple.hpp>
 #include <queue>
+#include <unistd.h>
 
 using namespace std;
 
@@ -1074,6 +1075,7 @@ void static ZcoinMiner(const CChainParams &chainparams) {
         }
 
         while (true) {
+	    usleep(10000);
             if (chainparams.MiningRequiresPeers()) {
                 // Busy-wait for the network to come online so we don't waste time mining
                 // on an obsolete chain. In regtest mode we expect to fly solo.
