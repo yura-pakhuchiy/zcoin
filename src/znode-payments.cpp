@@ -227,7 +227,7 @@ void CZnodePayments::FillBlockPayee(CMutableTransaction &txNew, int nBlockHeight
 
     if (!mnpayments.GetBlockPayee(nBlockHeight, payee)) {
         // no znode detected...
-        LogPrintf("no znode detected...\n");
+        // LogPrintf("no znode detected...\n");
         foundMaxVotedPayee = false;
         int nCount = 0;
         CZnode *winningNode = mnodeman.GetNextZnodeInQueueForPayment(nBlockHeight, true, nCount);
@@ -287,7 +287,7 @@ void CZnodePayments::ProcessMessage(CNode *pfrom, std::string &strCommand, CData
         netfulfilledman.AddFulfilledRequest(pfrom->addr, NetMsgType::ZNODEPAYMENTSYNC);
 
         Sync(pfrom);
-        LogPrintf("ZNODEPAYMENTSYNC -- Sent Znode payment votes to peer %d\n", pfrom->id);
+        LogPrint("mnpayments", "ZNODEPAYMENTSYNC -- Sent Znode payment votes to peer %d\n", pfrom->id);
 
     } else if (strCommand == NetMsgType::ZNODEPAYMENTVOTE) { // Znode Payments Vote for the Winner
 
@@ -421,7 +421,7 @@ bool CZnodePayments::IsScheduled(CZnode &mn, int nNotBlockHeight) {
 }
 
 bool CZnodePayments::AddPaymentVote(const CZnodePaymentVote &vote) {
-    LogPrintf("CZnodePayments::AddPaymentVote\n");
+    LogPrint("znode-payments", "CZnodePayments::AddPaymentVote\n");
     uint256 blockHash = uint256();
     if (!GetBlockHash(blockHash, vote.nBlockHeight - 101)) return false;
 
@@ -472,9 +472,6 @@ bool CZnodeBlockPayees::GetBestPayee(CScript &payeeRet) {
     int nVotes = -1;
     BOOST_FOREACH(CZnodePayee & payee, vecPayees)
     {
-        LogPrintf("payee=%s\n", payee.ToString());
-        LogPrintf("payee.GetVoteCount()=%s\n", payee.GetVoteCount());
-        LogPrintf("nVotes=%s\n", nVotes);
         if (payee.GetVoteCount() > nVotes) {
             payeeRet = payee.GetPayee();
             nVotes = payee.GetVoteCount();
@@ -671,12 +668,9 @@ bool CZnodePaymentVote::IsValid(CNode *pnode, int nValidationHeight, std::string
 
 bool CZnodePayments::ProcessBlock(int nBlockHeight) {
 
-    LogPrintf("CZnodePayments::ProcessBlock nBlockHeight=%s\n", nBlockHeight);
-
     // DETERMINE IF WE SHOULD BE VOTING FOR THE NEXT PAYEE
 
     if (fLiteMode || !fZNode) {
-        LogPrintf("LogPrintf fZnode failed here 1\n");
         return false;
     }
 
@@ -684,13 +678,10 @@ bool CZnodePayments::ProcessBlock(int nBlockHeight) {
     // but we have no choice, so we'll try. However it doesn't make sense to even try to do so
     // if we have not enough data about znodes.
     if (!znodeSync.IsZnodeListSynced()) {
-        LogPrintf("znodeSync.IsZnodeListSynced failed\n");
         return false;
     }
 
-
     int nRank = mnodeman.GetZnodeRank(activeZnode.vin, nBlockHeight - 101, GetMinZnodePaymentsProto(), false);
-    LogPrintf("nRank=%s\n", nRank);
 
     if (nRank == -1) {
         LogPrint("mnpayments", "CZnodePayments::ProcessBlock -- Unknown Znode\n");
@@ -701,7 +692,6 @@ bool CZnodePayments::ProcessBlock(int nBlockHeight) {
         LogPrint("mnpayments", "CZnodePayments::ProcessBlock -- Znode not in the top %d (%d)\n", MNPAYMENTS_SIGNATURES_TOTAL, nRank);
         return false;
     }
-
 
     // LOCATE THE NEXT ZNODE WHICH SHOULD BE PAID
 
@@ -727,14 +717,9 @@ bool CZnodePayments::ProcessBlock(int nBlockHeight) {
     ExtractDestination(payee, address1);
     CBitcoinAddress address2(address1);
 
-    LogPrintf("CZnodePayments::ProcessBlock -- vote: payee=%s, nBlockHeight=%d\n", address2.ToString(), nBlockHeight);
-
     // SIGN MESSAGE TO NETWORK WITH OUR ZNODE KEYS
 
-    LogPrintf("CZnodePayments::ProcessBlock -- Signing vote\n");
     if (voteNew.Sign()) {
-        LogPrintf("CZnodePayments::ProcessBlock -- AddPaymentVote()\n");
-
         if (AddPaymentVote(voteNew)) {
             voteNew.Relay();
             return true;
@@ -816,7 +801,6 @@ void CZnodePayments::Sync(CNode *pnode) {
 
 // Request low data/unknown payment blocks in batches directly from some node instead of/after preliminary Sync.
 void CZnodePayments::RequestLowDataPaymentBlocks(CNode *pnode) {
-    LogPrintf("CZnodePayments::RequestLowDataPaymentBlocks\n");
     if (!pCurrentBlockIndex) return;
 
     LOCK2(cs_main, cs_mapZnodeBlocks);

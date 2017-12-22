@@ -557,38 +557,37 @@ CZnode* CZnodeMan::GetNextZnodeInQueueForPayment(int nBlockHeight, bool fFilterS
     /*
         Make a vector with all of the last paid times
     */
-    LogPrintf("vZnodes.size()=%s\n", vZnodes.size());
     int nMnCount = CountEnabled();
     int index = 0;
     BOOST_FOREACH(CZnode &mn, vZnodes)
     {
         index += 1;
-        LogPrintf("index=%s, mn=%s\n", index, mn.ToString());
+        // LogPrintf("index=%s, mn=%s\n", index, mn.ToString());
         if(!mn.IsValidForPayment()) {
-            LogPrintf("Invalid payment!\n");
+            // LogPrintf("Invalid payment!\n");
             continue;
         }
         // //check protocol version
         if(mn.nProtocolVersion < mnpayments.GetMinZnodePaymentsProto()) {
-            LogPrintf("Invalid nProtocolVersion!\n");
-            LogPrintf("mn.nProtocolVersion=%s!\n", mn.nProtocolVersion);
-            LogPrintf("mnpayments.GetMinZnodePaymentsProto=%s!\n", mnpayments.GetMinZnodePaymentsProto());
+            // LogPrintf("Invalid nProtocolVersion!\n");
+            // LogPrintf("mn.nProtocolVersion=%s!\n", mn.nProtocolVersion);
+            // LogPrintf("mnpayments.GetMinZnodePaymentsProto=%s!\n", mnpayments.GetMinZnodePaymentsProto());
             continue;
         }
         //it's in the list (up to 8 entries ahead of current block to allow propagation) -- so let's skip it
         if(mnpayments.IsScheduled(mn, nBlockHeight)){
-            LogPrintf("mnpayments.IsScheduled!\n");
+            // LogPrintf("mnpayments.IsScheduled!\n");
             continue;
         }
         //it's too new, wait for a cycle
         if(fFilterSigTime && mn.sigTime + (nMnCount * 2.6 * 60) > GetAdjustedTime()){
-            LogPrintf("it's too new, wait for a cycle!\n");
+            // LogPrintf("it's too new, wait for a cycle!\n");
             continue;
         }
         //make sure it has at least as many confirmations as there are znodes
         if(mn.GetCollateralAge() < nMnCount) {
-            LogPrintf("mn.GetCollateralAge()=%s!\n", mn.GetCollateralAge());
-            LogPrintf("nMnCount=%s!\n", nMnCount);
+            // LogPrintf("mn.GetCollateralAge()=%s!\n", mn.GetCollateralAge());
+            // LogPrintf("nMnCount=%s!\n", nMnCount);
             continue;
         }
 
@@ -598,7 +597,7 @@ CZnode* CZnodeMan::GetNextZnodeInQueueForPayment(int nBlockHeight, bool fFilterS
 
     //when the network is in the process of upgrading, don't penalize nodes that recently restarted
     if(fFilterSigTime && nCount < nMnCount / 3) {
-        LogPrintf("Need Return, nCount=%s, nMnCount/3=%s\n", nCount, nMnCount/3);
+        // LogPrintf("Need Return, nCount=%s, nMnCount/3=%s\n", nCount, nMnCount/3);
         return GetNextZnodeInQueueForPayment(nBlockHeight, false, nCount);
     }
 
@@ -619,8 +618,6 @@ CZnode* CZnodeMan::GetNextZnodeInQueueForPayment(int nBlockHeight, bool fFilterS
     arith_uint256 nHighest = 0;
     BOOST_FOREACH (PAIRTYPE(int, CZnode*)& s, vecZnodeLastPaid){
         arith_uint256 nScore = s.second->CalculateScore(blockHash);
-        LogPrintf("node=%s\n", s.second->addr.ToString());
-        LogPrintf("nScore=%s, nHighest=%s\n", nScore.ToString(), nHighest.ToString());
         if(nScore > nHighest){
             nHighest = nScore;
             pBestZnode = s.second;
@@ -786,7 +783,7 @@ void CZnodeMan::ProcessZnodeConnections()
     BOOST_FOREACH(CNode* pnode, vNodes) {
         if(pnode->fZnode) {
             if(darkSendPool.pSubmittedToZnode != NULL && pnode->addr == darkSendPool.pSubmittedToZnode->addr) continue;
-            LogPrintf("Closing Znode connection: peer=%d, addr=%s\n", pnode->id, pnode->addr.ToString());
+            // LogPrintf("Closing Znode connection: peer=%d, addr=%s\n", pnode->id, pnode->addr.ToString());
             pnode->fDisconnect = true;
         }
     }
@@ -1421,7 +1418,6 @@ void CZnodeMan::UpdateZnodeList(CZnodeBroadcast mnb)
             }
         }
     } catch (const std::exception &e) {
-        LogPrintf("UpdateZnodeList\n");
         PrintExceptionContinue(&e, "UpdateZnodeList");
     }
 }
@@ -1523,10 +1519,9 @@ void CZnodeMan::UpdateLastPaid()
     LOCK(cs);
     if(fLiteMode) return;
     if(!pCurrentBlockIndex) {
-        LogPrintf("CZnodeMan::UpdateLastPaid, pCurrentBlockIndex=NULL\n");
+        // LogPrintf("CZnodeMan::UpdateLastPaid, pCurrentBlockIndex=NULL\n");
         return;
     }
-    LogPrintf("CZnodeMan::UpdateLastPaid,pCurrentBlockIndex->nHeight=%s\n", pCurrentBlockIndex->nHeight);
 
     static bool IsFirstRun = true;
     // Do full scan on first run or if we are not a znode
@@ -1587,25 +1582,6 @@ bool CZnodeMan::IsWatchdogActive()
     // Check if any znodes have voted recently, otherwise return false
     return (GetTime() - nLastWatchdogVoteTime) <= ZNODE_WATCHDOG_MAX_SECONDS;
 }
-
-//bool CZnodeMan::AddGovernanceVote(const CTxIn& vin, uint256 nGovernanceObjectHash)
-//{
-//    LOCK(cs);
-//    CZnode* pMN = Find(vin);
-//    if(!pMN)  {
-//        return false;
-//    }
-//    pMN->AddGovernanceVote(nGovernanceObjectHash);
-//    return true;
-//}
-
-//void CZnodeMan::RemoveGovernanceObject(uint256 nGovernanceObjectHash)
-//{
-//    LOCK(cs);
-//    BOOST_FOREACH(CZnode& mn, vZnodes) {
-//        mn.RemoveGovernanceObject(nGovernanceObjectHash);
-//    }
-//}
 
 void CZnodeMan::CheckZnode(const CTxIn& vin, bool fForce)
 {
