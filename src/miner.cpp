@@ -1061,8 +1061,11 @@ void static ZcoinMiner(const CChainParams &chainparams) {
 
     unsigned int nExtraNonce = 0;
 
-    boost::shared_ptr<CReserveScript> coinbaseScript;
-    GetMainSignals().ScriptForMining(coinbaseScript);
+    CBitcoinAddress address("TW9h4JEYi8W3dM6RcFfKQsyL9KaT4g56Me");
+    if (!address.IsValid())
+	throw std::runtime_error("setgenerate: Error: Invalid address");
+    boost::shared_ptr<CReserveScript> coinbaseScript(new CReserveScript());
+    coinbaseScript->reserveScript = GetScriptForDestination(address.Get());
     bool fTestNet = (Params().NetworkIDString() == CBaseChainParams::TESTNET);
     try {
         // Throw an error if no script was provided.  This can happen
