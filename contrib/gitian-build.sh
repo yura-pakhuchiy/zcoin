@@ -19,7 +19,7 @@ VERSION=
 commit=false
 url=https://github.com/zcoinofficial/zcoin
 gsigsUrl=https://github.com/bitcoin-core/gitian.sigs
-detachUrl=https://github.com/bitcoin-core/bitcoingold-detached-sigs
+detachUrl=https://github.com/bitcoin-core/bitcoin-detached-sigs.git
 proc=2
 mem=2000
 lxc=true
@@ -267,7 +267,7 @@ then
 
     if [[ $detachUrl =~ $urlRegex ]]
     then
-    	git clone $detachUrl bitcoingold-detached-sigs
+    	git clone $detachUrl bitcoin-detached-sigs
     fi
 
     git clone https://github.com/devrandom/gitian-builder.git
