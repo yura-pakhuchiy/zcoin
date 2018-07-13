@@ -292,7 +292,7 @@ popd
 if [[ $build = true ]]
 then
 	# Make output folder
-	mkdir -p ./bitcoin-binaries/${VERSION}
+	mkdir -p ./zcoin-binaries/${VERSION}
 
 	# Build Dependencies
 	echo ""
@@ -312,7 +312,7 @@ then
 	    echo ""
 	    ./bin/gbuild -j ${proc} -m ${mem} --commit zcoin=${COMMIT} --url zcoin=${url} ../zcoin/contrib/gitian-descriptors/gitian-linux.yml
 	    ./bin/gsign -p "${signProg}" --signer $SIGNER --release ${VERSION}-linux --destination ../gitian.sigs/ ../zcoin/contrib/gitian-descriptors/gitian-linux.yml
-	    mv build/out/zcoin-*.tar.gz build/out/src/zcoin-*.tar.gz ../bitcoin-binaries/${VERSION}
+	    mv build/out/zcoin-*.tar.gz build/out/src/zcoin-*.tar.gz ../zcoin-binaries/${VERSION}
 	fi
 	# Windows
 	if [[ $windows = true ]]
@@ -342,7 +342,7 @@ then
 	    ./bin/gbuild -j ${proc} -m ${mem} --commit zcoin=${COMMIT} --url zcoin=${url} ../zcoin/contrib/gitian-descriptors/gitian-win.yml
 	    ./bin/gsign -p "${signProg}" --signer $SIGNER --release ${VERSION}-win-unsigned --destination ../gitian.sigs/ ../zcoin/contrib/gitian-descriptors/gitian-win.yml
 	    mv build/out/zcoin-*-win-unsigned.tar.gz inputs/zcoin-win-unsigned.tar.gz
-	    mv build/out/zcoin-*.zip build/out/zcoin-*.exe ../bitcoin-binaries/${VERSION}
+	    mv build/out/zcoin-*.zip build/out/zcoin-*.exe ../zcoin-binaries/${VERSION}
 	fi
 	# Mac OSX
 	if [[ $osx = true ]]
@@ -353,7 +353,7 @@ then
 	    ./bin/gbuild -j ${proc} -m ${mem} --commit zcoin=${COMMIT} --url zcoin=${url} ../zcoin/contrib/gitian-descriptors/gitian-osx.yml
 	    ./bin/gsign -p "${signProg}" --signer $SIGNER --release ${VERSION}-osx-unsigned --destination ../gitian.sigs/ ../zcoin/contrib/gitian-descriptors/gitian-osx.yml
 	    mv build/out/zcoin-*-osx-unsigned.tar.gz inputs/zcoin-osx-unsigned.tar.gz
-	    mv build/out/zcoin-*.tar.gz build/out/zcoin-*.dmg ../bitcoin-binaries/${VERSION}
+	    mv build/out/zcoin-*.tar.gz build/out/zcoin-*.dmg ../zcoin-binaries/${VERSION}
 	fi
 	popd
 
@@ -417,8 +417,8 @@ then
 	    echo ""
 	    ./bin/gbuild -i --commit signature=${COMMIT} --url signature=${detachUrl} ../zcoin/contrib/gitian-descriptors/gitian-win-signer.yml
 	    ./bin/gsign -p "${signProg}" --signer $SIGNER --release ${VERSION}-win-signed --destination ../gitian.sigs/ ../zcoin/contrib/gitian-descriptors/gitian-win-signer.yml
-	    mv build/out/zcoin-*win64-setup.exe ../bitcoin-binaries/${VERSION}
-	    mv build/out/zcoin-*win32-setup.exe ../bitcoin-binaries/${VERSION}
+	    mv build/out/zcoin-*win64-setup.exe ../zcoin-binaries/${VERSION}
+	    mv build/out/zcoin-*win32-setup.exe ../zcoin-binaries/${VERSION}
 	fi
 	# Sign Mac OSX
 	if [[ $osx = true ]]
@@ -428,7 +428,7 @@ then
 	    echo ""
 	    ./bin/gbuild -i --commit signature=${COMMIT} --url signature=${detachUrl} ../zcoin/contrib/gitian-descriptors/gitian-osx-signer.yml
 	    ./bin/gsign -p "${signProg}" --signer $SIGNER --release ${VERSION}-osx-signed --destination ../gitian.sigs/ ../zcoin/contrib/gitian-descriptors/gitian-osx-signer.yml
-	    mv build/out/zcoin-osx-signed.dmg ../bitcoin-binaries/${VERSION}/zcoin-${VERSION}-osx.dmg
+	    mv build/out/zcoin-osx-signed.dmg ../zcoin-binaries/${VERSION}/zcoin-${VERSION}-osx.dmg
 	fi
 	popd
 
