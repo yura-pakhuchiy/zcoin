@@ -312,7 +312,7 @@ then
 	    echo ""
 	    ./bin/gbuild -j ${proc} -m ${mem} --commit zcoin=${COMMIT} --url zcoin=${url} ../zcoin/contrib/gitian-descriptors/gitian-linux.yml
 	    ./bin/gsign -p "${signProg}" --signer $SIGNER --release ${VERSION}-linux --destination ../gitian.sigs/ ../zcoin/contrib/gitian-descriptors/gitian-linux.yml
-	    mv build/out/zcoin-${VERSION}.tar.gz build/out/src/zcoin-${VERSION}.tar.gz ../zcoin-binaries/${VERSION}
+	    mv build/out/zcoin-*.tar.gz build/out/src/zcoin-*.tar.gz ../zcoin-binaries/${VERSION}
 	fi
 	# Windows
 	if [[ $windows = true ]]
