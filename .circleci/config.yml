@@ -30,3 +30,7 @@ jobs:
       - run:
           name: BUILD Zcoin
           command: make
+      - run:
+          name: RUN Unit test
+          command: make check
+          
