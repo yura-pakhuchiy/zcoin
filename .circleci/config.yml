@@ -6,14 +6,14 @@ jobs:
     steps:
       - checkout
       - run: 
-          name: install dependencies
+          name: INSTALL DEPENDENCIES
           command: apt-get -y update; 
             apt-get install -y build-essential libtool autotools-dev automake pkg-config libssl-dev libevent-dev bsdmainutils libboost-all-dev wget; 
             apt-get install -y software-properties-common; 
             apt-get install -y libminiupnpc-dev libzmq3-dev;
             apt-get install -y libqt5gui5 libqt5core5a libqt5dbus5 qttools5-dev qttools5-dev-tools libprotobuf-dev protobuf-compiler libqrencode-dev 
       - run:
-          name: libdb
+          name: LIBDB
           command: apt-get install -y checkinstall;
             wget http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz;
             tar -xzvf db-4.8.30.NC.tar.gz;
@@ -28,5 +28,5 @@ jobs:
           name: CONFIGURE
           command: ./configure
       - run:
-          name: MAKE
-          command: make -j4
+          name: BUILD Zcoin
+          command: make
