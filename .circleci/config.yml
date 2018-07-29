@@ -6,8 +6,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Greeting
-          command: echo Hello, world.
+          name: AUTOGEN
+          command: ./autogen.sh
       - run:
-          name: Print the Current Time
-          command: date
+          name: CONFIGURE
+          command: ./configure
+      -run:
+          name: MAKE
+          command: make -j4
