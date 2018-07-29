@@ -11,6 +11,6 @@ jobs:
       - run:
           name: CONFIGURE
           command: ./configure
-      -run:
+      - run:
           name: MAKE
           command: make -j4
